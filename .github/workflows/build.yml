@@ -69,7 +69,7 @@ jobs:
           POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
           POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --no-frozen-lockfile
           pnpm add -D --save-exact @capacitor/cli@7 @capacitor/android@7 @capacitor/core@7 @capgo/capacitor-updater@7
           pnpm exec cap --version
           pnpm exec vite --version
