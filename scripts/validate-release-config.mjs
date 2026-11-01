@@ -1,0 +1,10 @@
+const feed = process.env.POKEVOID_UPDATE_FEED;
+const base = process.env.POKEVOID_RELEASE_BASE_URL;
+const repo = process.env.GITHUB_REPOSITORY;
+if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) throw Error('Missing GitHub repository');
+const [owner, name] = repo.split('/');
+const expectedFeed = `https://${owner.toLowerCase()}.github.io/${name}/capacitor-update.json`;
+const expectedBase = `https://github.com/${owner}/${name}/releases/download/game-feed/`;
+if (feed !== expectedFeed) throw Error(`Feed URL must equal ${expectedFeed}`);
+if (base !== expectedBase) throw Error(`Release base URL must equal ${expectedBase}`);
+console.log('Publication endpoints validated');

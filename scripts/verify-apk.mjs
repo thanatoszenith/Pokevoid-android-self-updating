@@ -1,0 +1,17 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+const apk = process.argv[2];
+if (!apk || !fs.existsSync(apk)) throw new Error('Provide compiled APK path');
+const listing = execFileSync('unzip', ['-Z','-1',apk], {encoding:'utf8'}).split('\n').filter(Boolean);
+if (new Set(listing).size !== listing.length) throw new Error('APK contains duplicate entry names');
+const forbiddenNative = listing.filter(f => /(?:^|\/)(?:pokesave|battle-anims|sprites|pokemon|audio|music|sfx)(?:\/|$)/i.test(f) && !f.startsWith('META-INF/'));
+if (forbiddenNative.length) throw new Error('Unexpected game-content directories in APK: '+forbiddenNative.join(', '));
+const web = listing.filter(f => f.startsWith('assets/public/') && !f.endsWith('/'));
+if (!web.includes('assets/public/index.html')) throw new Error('Missing bootstrap index.html');
+const unexpected = web.filter(f => !/^assets\/public\/(?:index\.html|assets\/(?:index|main)-[^/]+\.(?:js|css))$/.test(f));
+if (unexpected.length) throw new Error('Unexpected embedded web files: '+unexpected.join(', '));
+if (!web.some(f => /^assets\/public\/assets\/(?:index|main)-[^/]+\.js$/.test(f))) throw new Error('Missing executable bootstrap JavaScript');
+const index = execFileSync('unzip',['-p',apk,'assets/public/index.html'],{encoding:'utf8',maxBuffer:1024*1024});
+if (!index.includes('PokéVoid') || !/<script\b/i.test(index)) throw new Error('Invalid bootstrap HTML or missing script');
+if (/\b(?:src|href)\s*=\s*['"]https?:/i.test(index)) throw new Error('External bootstrap asset reference');
+console.log('APK bootstrap allowlist passed:',web.join(', '));

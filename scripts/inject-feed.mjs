@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const file = process.argv[2];
+const feed = process.env.POKEVOID_UPDATE_FEED;
+if (!file || !feed) throw Error('Expected source path and POKEVOID_UPDATE_FEED');
+const url = new URL(feed);
+if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw Error('Invalid update feed URL');
+const source = fs.readFileSync(file, 'utf8');
+const marker = "'__POKEVOID_UPDATE_FEED__'";
+if (source.split(marker).length !== 2) throw Error('Expected exactly one feed placeholder');
+fs.writeFileSync(file, source.replace(marker, JSON.stringify(feed)));

@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+const version=process.env.POKEVOID_VERSION;
+const base=process.env.POKEVOID_RELEASE_BASE_URL;
+if (!/^\d+(\.\d+)*$/.test(version||'') || version.split('.').some(x => !Number.isSafeInteger(Number(x)))) throw Error('Invalid version');
+const url=new URL(`pokevoid-game-${version}.zip`,base);
+if(url.protocol!=='https:' || !url.hostname) throw Error('HTTPS release base required');
+const filename=`pokevoid-game-${version}.zip`;
+const checksum=crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
+fs.writeFileSync('capacitor-update.json',JSON.stringify({version,url:url.href,checksum,features:['offline-daily-v1','official-daily-cache-v1']},null,2)+'\n');
+console.log('Created capacitor-update.json for',filename);

@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+const path = process.argv[2];
+const feed = process.env.POKEVOID_UPDATE_FEED;
+const base = process.env.POKEVOID_RELEASE_BASE_URL;
+if (!feed || !base) throw Error('Both update feed and release base URL are required');
+const expectedFeed = `https://${process.env.GITHUB_REPOSITORY_OWNER}.github.io/${process.env.GITHUB_REPOSITORY.split('/')[1]}/capacitor-update.json`;
+if (feed !== expectedFeed) throw Error(`Update feed must be ${expectedFeed}; GitHub release asset URLs are not suitable as a browser fetch feed`);
+const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+if (!Array.isArray(manifest.features) || !manifest.features.includes('offline-daily-v1') || !manifest.features.includes('official-daily-cache-v1')) throw Error('Manifest does not declare protected daily features');
+const expectedUrl = new URL(`pokevoid-game-${manifest.version}.zip`, base).href;
+if (manifest.url !== expectedUrl) throw Error(`Manifest game ZIP URL mismatch: ${manifest.url}`);
+if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/game-feed\/$/.test(base)) throw Error('Release base must point to the game-feed release in GitHub');
+const zip = `pokevoid-game-${manifest.version}.zip`;
+if (!fs.existsSync(zip)) throw Error(`Missing release ZIP: ${zip}`);
+const actual = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
+if (actual !== manifest.checksum) throw Error('Manifest checksum does not match game ZIP');
+console.log('Release feed, ZIP URL, and SHA-256 verified');
