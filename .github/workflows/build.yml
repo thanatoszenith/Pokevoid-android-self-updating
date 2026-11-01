@@ -48,7 +48,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      # GitHub ubuntu-latest already provides ANDROID_HOME and Android SDK tools.
+      # Avoid setup-android@v3, which attempts to install the removed 'tools' SDK package.
       - name: Validate feed and patcher
         working-directory: game
         env:
