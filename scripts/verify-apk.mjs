@@ -8,7 +8,7 @@ const forbiddenNative = listing.filter(f => /(?:^|\/)(?:pokesave|battle-anims|sp
 if (forbiddenNative.length) throw new Error('Unexpected game-content directories in APK: '+forbiddenNative.join(', '));
 const web = listing.filter(f => f.startsWith('assets/public/') && !f.endsWith('/'));
 if (!web.includes('assets/public/index.html')) throw new Error('Missing bootstrap index.html');
-const unexpected = web.filter(f => !/^assets\/public\/(?:index\.html|assets\/(?:index|main)-[^/]+\.(?:js|css))$/.test(f));
+const unexpected = web.filter(f => !/^assets\/public\/(?:index\.html|cordova\.js|cordova_plugins\.js|assets\/(?:index|main|web)-[^/]+\.(?:js|css))$/.test(f));
 if (unexpected.length) throw new Error('Unexpected embedded web files: '+unexpected.join(', '));
 if (!web.some(f => /^assets\/public\/assets\/(?:index|main)-[^/]+\.js$/.test(f))) throw new Error('Missing executable bootstrap JavaScript');
 const index = execFileSync('unzip',['-p',apk,'assets/public/index.html'],{encoding:'utf8',maxBuffer:1024*1024});
