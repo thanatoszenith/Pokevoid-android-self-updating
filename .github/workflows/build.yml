@@ -61,7 +61,8 @@ jobs:
           node -e 'const u=new URL(process.env.POKEVOID_UPDATE_FEED);if(u.protocol!=="https:" || u.username || u.password || u.hash)process.exit(1)'
           node -e 'const v=process.env.POKEVOID_VERSION;if(!/^\d+(?:\.\d+)*$/.test(v)||v.split(".").some(x=>!Number.isSafeInteger(Number(x))))process.exit(1)'
       - name: Run local build-script tests
-        run: node --test wrapper/tests/*.test.mjs
+        working-directory: wrapper
+        run: node --test tests/*.test.mjs
       - name: Build downloadable full game bundle
         working-directory: game
         env:
