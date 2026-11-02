@@ -91,10 +91,10 @@ jobs:
           source=activity.read_text()
           if 'registerPlugin(ResumableDownloadPlugin.class)' not in source:
               if 'import com.getcapacitor.BridgeActivity;' not in source: raise RuntimeError('Cannot locate BridgeActivity import')
-              source=source.replace('import com.getcapacitor.BridgeActivity;', 'import com.getcapacitor.BridgeActivity;\nimport com.zenni.pokevoid.ResumableDownloadPlugin;\nimport android.os.Bundle;')
+              source=source.replace('import com.getcapacitor.BridgeActivity;', 'import com.getcapacitor.BridgeActivity;\nimport com.zenni.pokevoid.ResumableDownloadPlugin;\nimport com.zenni.pokevoid.SharedStoragePlugin;\nimport android.os.Bundle;')
               marker='public class MainActivity extends BridgeActivity {'
               if marker not in source: raise RuntimeError('Generated MainActivity layout changed')
-              source=source.replace(marker, marker+'\n  @Override public void onCreate(Bundle savedInstanceState) {\n    registerPlugin(ResumableDownloadPlugin.class);\n    super.onCreate(savedInstanceState);\n  }')
+              source=source.replace(marker, marker+'\n  @Override public void onCreate(Bundle savedInstanceState) {\n    registerPlugin(ResumableDownloadPlugin.class);\n    registerPlugin(SharedStoragePlugin.class);\n    super.onCreate(savedInstanceState);\n  }')
           activity.write_text(source)
           PY
           # Capgo imports a verified archive over a loopback-only HTTP server.
