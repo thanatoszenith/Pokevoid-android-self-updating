@@ -32,6 +32,9 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (!dir.exists() && !dir.mkdirs()) throw new IOException("Cannot create download directory");
                 String key = sha.toLowerCase(Locale.ROOT);
                 File partial = new File(dir, key + ".part"), complete = new File(dir, key + ".zip");
+                if (complete.exists() && matches(complete, key)) {
+                    sendProgress(complete.length(), complete.length());
+                }
                 if (!complete.exists() || !matches(complete, key)) {
                     if (complete.exists()) complete.delete();
                     fetch(source, partial, key);
@@ -71,7 +74,12 @@ public class ResumableDownloadPlugin extends Plugin {
 
     private void fetch(URL url, File partial, String checksum) throws Exception {
         long offset = partial.exists() ? partial.length() : 0;
-        if (offset > 0 && matches(partial, checksum)) return;
+        if (offset > 0 && matches(partial, checksum)) {
+            sendProgress(offset, offset);
+            return;
+        }
+        // Report resumed bytes before the next network read, so the UI never starts at zero.
+        sendProgress(offset, -1);
         IOException lastFailure = null;
         for (int attempt = 0; attempt < 5; attempt++) {
             HttpURLConnection c = null;
@@ -114,7 +122,8 @@ public class ResumableDownloadPlugin extends Plugin {
                     throw new IOException("Encoded download response refused");
                 }
                 long done = offset;
-                long lastEvent = 0;
+                sendProgress(done, total);
+                long lastEvent = System.currentTimeMillis();
                 try (InputStream input = c.getInputStream();
                      FileOutputStream output = new FileOutputStream(partial, offset > 0)) {
                     byte[] buf = new byte[65536];
@@ -125,20 +134,14 @@ public class ResumableDownloadPlugin extends Plugin {
                         done += n;
                         long now = System.currentTimeMillis();
                         if (now - lastEvent >= 300) {
-                            JSObject event = new JSObject();
-                            event.put("downloaded", done);
-                            event.put("total", total);
-                            notifyListeners("progress", event);
+                            sendProgress(done, total);
                             lastEvent = now;
                         }
                     }
                     output.getFD().sync();
                 }
                 offset = done;
-                JSObject event = new JSObject();
-                event.put("downloaded", done);
-                event.put("total", total);
-                notifyListeners("progress", event);
+                sendProgress(done, total);
                 if (total >= 0 && done != total) throw new IOException("Incomplete HTTP response");
                 return;
             } catch (IOException error) {
@@ -154,6 +157,13 @@ public class ResumableDownloadPlugin extends Plugin {
             }
         }
         throw new IOException("Download interrupted after retries; partial data preserved", lastFailure);
+    }
+
+    private void sendProgress(long downloaded, long total) {
+        JSObject event = new JSObject();
+        event.put("downloaded", downloaded);
+        event.put("total", total);
+        notifyListeners("progress", event);
     }
 
     private boolean matches(File file, String checksum) throws Exception {
