@@ -133,9 +133,9 @@ async function main() {
       status.textContent = 'Downloading game… Keep this app open.';
       downloadStarted = Date.now();
       lastPercent = 0;
-      totalBytes = await fetchBundleSize(latest.url);
+      totalBytes = undefined; // Native progress reports actual response size without a CORS-blocked HEAD request.
       showProgress();
-      const ready = await findReadyBundle(latest.version, latest.checksum);
+      const ready = await findReadyBundle(latest.version, latest.checksum).catch(error => { console.warn('Bundle recovery lookup failed', error); return undefined; });
       if (ready) {
         status.textContent = 'Restoring previously downloaded game…';
         await CapacitorUpdater.set(ready);
