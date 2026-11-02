@@ -64,7 +64,11 @@ public class DownloadForegroundService extends Service {
 
     private void refreshWakeLock(long now) {
         if (downloadWakeLock == null || now - lastWakeRefreshMs < 5L * 60L * 1000L) return;
-        downloadWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
+        try { downloadWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS); }
+        catch (SecurityException error) {
+            android.util.Log.w("PokeVoid", "Unable to refresh download wake lock", error);
+            downloadWakeLock = null;
+        }
         lastWakeRefreshMs = now;
     }
 
@@ -74,7 +78,11 @@ public class DownloadForegroundService extends Service {
         if (power != null) {
             downloadWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PokeVoid:Download");
             downloadWakeLock.setReferenceCounted(false);
-            downloadWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
+            try { downloadWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS); }
+            catch (SecurityException error) {
+                android.util.Log.w("PokeVoid", "Wake lock unavailable; download may pause in background", error);
+                downloadWakeLock = null;
+            }
             lastWakeRefreshMs = android.os.SystemClock.elapsedRealtime();
         }
         runningService = this;
