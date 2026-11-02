@@ -109,6 +109,11 @@ async function restoreInstalledGame(): Promise<boolean> {
     return true;
   }
 }
+/** Recover a fully downloaded, verified bundle after an app restart without downloading it twice. */
+async function findReadyBundle(version: string, checksum: string) {
+  const { bundles } = await CapacitorUpdater.list();
+  return bundles.find(bundle => bundle.version === version && bundle.status === 'success' && bundle.checksum?.toLowerCase() === checksum.toLowerCase());
+}
 async function main() {
   button.disabled = true;
   if (!Capacitor.isNativePlatform()) { status.textContent = 'Install this Android application to download the game.'; return; }
@@ -129,6 +134,12 @@ async function main() {
       lastPercent = 0;
       totalBytes = await fetchBundleSize(latest.url);
       showProgress();
+      const ready = await findReadyBundle(latest.version, latest.checksum);
+      if (ready) {
+        status.textContent = 'Restoring previously downloaded game…';
+        await CapacitorUpdater.set(ready);
+        return;
+      }
       const progressListener = await CapacitorUpdater.addListener('download', (event: {percent?: number}) => {
         showProgress(event.percent);
       });
