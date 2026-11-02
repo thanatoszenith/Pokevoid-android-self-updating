@@ -197,3 +197,16 @@ test('direct external saves migrate before game boot and persist writes atomical
   assert.match(shared, /readSaves\(PluginCall call\)/);
   assert.match(shared, /deleteSave\(PluginCall call\)/);
 });
+
+test('native HTTP request parser uses valid Java character escapes', () => {
+  assert.match(native, /if \(c == '\\n'\)/);
+  assert.match(native, /if \(c != '\\r'\)/);
+  assert.doesNotMatch(native, /if \(c == '\\\\n'\)/);
+  assert.doesNotMatch(native, /if \(c != '\\\\r'\)/);
+});
+
+test('resumable response validates offsets without requiring an entire suffix', () => {
+  assert.match(native, /end < offset \|\| declaredTotal <= end/);
+  assert.doesNotMatch(native, /end != declaredTotal - 1/);
+  assert.match(native, /if \(total >= 0 && done != total\)/);
+});
