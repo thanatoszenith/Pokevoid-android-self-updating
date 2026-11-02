@@ -126,3 +126,17 @@ test('cached ZIP verification is reused rather than hashing the same large archi
   assert.match(native, /if \(!verifiedComplete\)/);
   assert.doesNotMatch(native, /if \(!complete\.exists\(\) \|\| !matches\(complete, key\)\)/);
 });
+
+test('native downloader checks each HTTPS redirect and limits redirect hops', () => {
+  assert.match(native, /setInstanceFollowRedirects\(false\)/);
+  assert.match(native, /for \(int hop = 0; hop <= 8; hop\+\+\)/);
+  assert.match(native, /Non-HTTPS or credential-bearing redirect refused/);
+  assert.match(native, /if \(!returned\) connection\.disconnect\(\)/);
+});
+
+test('loopback server uses bounded workers instead of spawning threads for every client', () => {
+  assert.match(native, /new ThreadPoolExecutor\(2, 4, 30L, TimeUnit\.SECONDS, new ArrayBlockingQueue<Runnable>\(8\)\)/);
+  assert.match(native, /clients\.execute\(/);
+  assert.match(native, /catch \(RejectedExecutionException busy\)/);
+  assert.doesNotMatch(native, /"pokevoid-archive-client"\)\.start\(\)/);
+});
