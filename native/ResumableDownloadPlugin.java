@@ -25,6 +25,7 @@ public class ResumableDownloadPlugin extends Plugin {
     private final ExecutorService clients = new ThreadPoolExecutor(2, 4, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(8));
     private volatile ServerSocket server;
     private volatile String serverToken;
+    private volatile String servedChecksum;
 
     @PluginMethod
     public void download(PluginCall call) {
@@ -59,7 +60,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 }
                 JSObject result = new JSObject();
                 result.put("bytes", complete.length());
-                result.put("url", startLocalServer(complete));
+                result.put("url", startLocalServer(complete, key));
                 call.resolve(result);
             } catch (Exception error) { call.reject("Resumable download failed", error); }
             finally { getContext().stopService(new Intent(getContext(), DownloadForegroundService.class)); }
@@ -77,8 +78,9 @@ public class ResumableDownloadPlugin extends Plugin {
                 File dir = new File(getContext().getFilesDir(), "resumable-bundles");
                 File archive = new File(dir, sha.toLowerCase(Locale.ROOT) + ".zip");
                 synchronized (this) {
-                    if (server != null) { server.close(); server = null; }
-                    serverToken = null;
+                    if (server != null && sha.equalsIgnoreCase(servedChecksum)) {
+                        server.close(); server = null; serverToken = null; servedChecksum = null;
+                    }
                 }
                 if (archive.exists() && !archive.delete()) throw new IOException("Could not remove imported archive");
                 call.resolve();
@@ -223,9 +225,10 @@ public class ResumableDownloadPlugin extends Plugin {
         return hex.toString().equals(checksum);
     }
 
-    private synchronized String startLocalServer(File file) throws IOException {
+    private synchronized String startLocalServer(File file, String checksum) throws IOException {
         if (server != null && !server.isClosed()) server.close();
         server = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
+        servedChecksum = checksum;
         serverToken = java.util.UUID.randomUUID().toString();
         String token = serverToken;
         ServerSocket socket = server;
@@ -241,16 +244,28 @@ public class ResumableDownloadPlugin extends Plugin {
         return "http://127.0.0.1:" + socket.getLocalPort() + "/" + token + "/bundle.zip";
     }
 
+    /** Limit each HTTP line before allocating an unbounded String. */
+    private String readLimitedLine(BufferedReader reader) throws IOException {
+        StringBuilder line = new StringBuilder();
+        for (int i = 0; i <= 8192; i++) {
+            int c = reader.read();
+            if (c == -1) return line.length() == 0 ? null : line.toString();
+            if (c == '\\n') return line.toString();
+            if (c != '\\r') line.append((char) c);
+        }
+        throw new IOException("HTTP request line exceeds limit");
+    }
+
     private void executorForClient(Socket client, File file, String token) {
         try {
             clients.execute(() -> {
             try (Socket s = client; BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII))) {
                 s.setSoTimeout(30000);
-                String request = reader.readLine();
+                String request = readLimitedLine(reader);
                 if (request == null || request.length() > 8192 || !(request.equals("GET /" + token + "/bundle.zip HTTP/1.1") || request.equals("HEAD /" + token + "/bundle.zip HTTP/1.1"))) return;
                 String line, range = null;
                 int headerCount = 0;
-                while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                while ((line = readLimitedLine(reader)) != null && !line.isEmpty()) {
                     if (++headerCount > 64 || line.length() > 8192) return;
                     if (line.toLowerCase(Locale.ROOT).startsWith("range:")) range = line.substring(6).trim();
                 }
