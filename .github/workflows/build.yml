@@ -104,8 +104,8 @@ jobs:
           text=p.read_text()
           assert '<application' in text
           import re
-          if re.search(r'android:usesCleartextTraffic\\s*=', text):
-              text=re.sub(r'android:usesCleartextTraffic\\s*=\\s*"[^"]*"', 'android:usesCleartextTraffic="true"', text, count=1)
+          if 'android:usesCleartextTraffic=' in text:
+              text=re.sub('android:usesCleartextTraffic="[^"]*"', 'android:usesCleartextTraffic="true"', text, count=1)
           else:
               text=text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
           p.write_text(text)
