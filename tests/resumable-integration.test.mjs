@@ -72,3 +72,16 @@ test('loopback ZIP server rejects invalid ranges and caps request headers', () =
 test('bootstrap does not make redundant cross-origin HEAD requests', () => {
   assert.doesNotMatch(bootstrap, /fetchBundleSize\(/);
 });
+
+test('bootstrap retry reuses the interrupted download action directly', () => {
+  assert.match(bootstrap, /const install = async \(\) => \{/);
+  assert.match(bootstrap, /retry\('Retry download', install\)/);
+  assert.doesNotMatch(bootstrap, /retry\('Retry download', async \(\) => \{ await main\(\); \}\)/);
+});
+
+test('HTTP 416 response uses CRLF escapes, not escaped backslash characters', () => {
+  const line = native.split('\n').find(x => x.includes('416 Range Not Satisfiable'));
+  assert.ok(line);
+  assert.ok(line.includes(String.raw`\r\nContent-Range`));
+  assert.ok(!line.includes(String.raw`\\r\\nContent-Range`));
+});
