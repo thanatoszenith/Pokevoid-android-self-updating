@@ -176,7 +176,7 @@ test('root-level PokeVoid storage is explicitly permission-gated and preserves w
   assert.match(shared, /"Game"/);
   assert.match(shared, /"Saves"/);
   assert.match(shared, /if \(dest\.exists\(\)\) return/);
-  assert.match(native, /SharedStoragePlugin\.mirrorArchive\(complete, key\)/);
+  assert.doesNotMatch(native, /SharedStoragePlugin\.mirrorArchive\(complete, key\)/);
   assert.match(workflow, /registerPlugin\(SharedStoragePlugin\.class\)/);
   assert.match(workflow, /MANAGE_EXTERNAL_STORAGE/);
   assert.match(bridge, /configureSharedStorage/);
