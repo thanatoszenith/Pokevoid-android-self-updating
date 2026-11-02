@@ -100,7 +100,21 @@ export async function updateBeforeGame(): Promise<boolean> {
   const overlay = showOverlay();
   try {
     overlay.message('Downloading update… Gameplay is paused.');
-    const bundle = await CapacitorUpdater.download({ url: release.url, version: release.version, checksum: release.checksum });
+    let totalBytes: number | undefined;
+    try {
+      const head = await fetch(release.url, { method: 'HEAD' });
+      const size = Number(head.headers.get('content-length'));
+      if (head.ok && Number.isSafeInteger(size) && size > 0) totalBytes = size;
+    } catch { /* File size is optional; update still proceeds. */ }
+    const mb = (n: number) => (n / 1048576).toFixed(1) + ' MB';
+    const listener = await CapacitorUpdater.addListener('download', ({ percent }) => {
+      if (typeof percent !== 'number' || !Number.isFinite(percent)) return;
+      overlay.message(totalBytes ? `Downloading update: ${mb(totalBytes * percent / 100)} received • ${mb(totalBytes * (100 - percent) / 100)} remaining` : `Downloading update: ${percent.toFixed(1)}%`);
+    });
+    let bundle;
+    try {
+      bundle = await CapacitorUpdater.download({ url: release.url, version: release.version, checksum: release.checksum });
+    } finally { await listener.remove(); }
     overlay.message('Installing update…');
     await CapacitorUpdater.set(bundle); // Capgo switches/reloads the web bundle.
     // Never boot the old document while a bundle switch is underway.
