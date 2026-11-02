@@ -32,3 +32,18 @@ test('Android build registers the plugin and bundles both TypeScript shims', () 
   assert.ok(fs.existsSync('bootstrap/resumable-download.ts'));
   assert.ok(fs.existsSync('patches/resumable-download.ts'));
 });
+
+test('resumed responses validate byte ranges and archive cleanup happens only after import', () => {
+  assert.match(native, /declaredTotal = Long\.parseLong/);
+  assert.match(native, /Inconsistent Content-Range and Content-Length/);
+  for (const source of [bootstrap, gate]) {
+    const imported = source.indexOf('CapacitorUpdater.download({');
+    const released = source.indexOf('ResumableDownload.releaseArchive(');
+    assert.ok(imported >= 0 && released > imported, 'archive cannot be deleted before import');
+  }
+});
+
+test('build patches the generated activity rather than introducing a duplicate', () => {
+  assert.match(workflow, /rglob\('MainActivity\.java'\)/);
+  assert.doesNotMatch(workflow, /cat > android\/app\/src\/main\/java\/com\/zenni\/pokevoid\/MainActivity\.java/);
+});
