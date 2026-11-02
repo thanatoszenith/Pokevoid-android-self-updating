@@ -150,6 +150,7 @@ async function main() {
         const archive = await ResumableDownload.download({ url: latest.url, checksum: latest.checksum });
         status.textContent = 'Importing verified game bundle…';
         bundle = await CapacitorUpdater.download({url: archive.url, version:latest.version, checksum:latest.checksum});
+        await ResumableDownload.releaseArchive({ checksum: latest.checksum }).catch(error => console.warn('Archive cleanup deferred', error));
       } finally {
         await progressListener.remove();
       }
