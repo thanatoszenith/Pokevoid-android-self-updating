@@ -1,4 +1,5 @@
 import { ResumableDownload } from './resumable-download';
+import { configureSharedStorage } from './shared-storage';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
@@ -188,4 +189,12 @@ async function main() {
   };
   retry('Download game', install);
 }
+const storageButton = document.createElement('button');
+storageButton.textContent = 'Enable PokeVoid folder';
+storageButton.style.cssText = 'display:block;margin:12px auto;padding:10px';
+storageButton.onclick = () => {
+  void configureSharedStorage().then(() => { storageButton.textContent = 'Check PokeVoid folder access'; })
+    .catch(error => { console.warn('Shared storage unavailable', error); status.textContent = 'Storage permission was not granted. Existing game data is unchanged.'; });
+};
+document.body.append(storageButton);
 void main();
