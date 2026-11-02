@@ -111,14 +111,8 @@ export async function updateBeforeGame(): Promise<boolean> {
   const overlay = showOverlay();
   try {
     overlay.message('Downloading update… Gameplay is paused.');
-    let totalBytes: number | undefined;
-    try {
-      const head = await fetch(release.url, { method: 'HEAD' });
-      const size = Number(head.headers.get('content-length'));
-      if (head.ok && Number.isSafeInteger(size) && size > 0) totalBytes = size;
-    } catch { /* File size is optional; update still proceeds. */ }
     const mb = (n: number) => (n / 1048576).toFixed(1) + ' MB';
-    const ready = await findReadyBundle(release.version, release.checksum);
+    const ready = await findReadyBundle(release.version, release.checksum).catch(error => { console.warn('[UpdateGate] Recovery lookup unavailable', error); return undefined; });
     if (ready) {
       overlay.message('Activating previously downloaded update…');
       await CapacitorUpdater.set(ready);
