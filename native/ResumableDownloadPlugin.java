@@ -214,6 +214,8 @@ public class ResumableDownloadPlugin extends Plugin {
         event.put("downloaded", downloaded);
         event.put("total", total);
         notifyListeners("progress", event);
+        try { DownloadForegroundService.updateProgress(getContext(), downloaded, total); }
+        catch (RuntimeException error) { android.util.Log.w("PokeVoid", "Notification progress unavailable", error); }
     }
 
     private boolean matches(File file, String checksum) throws Exception {
