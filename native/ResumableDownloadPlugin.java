@@ -42,7 +42,7 @@ public class ResumableDownloadPlugin extends Plugin {
             return;
         }
         activeDownloads.incrementAndGet();
-        executor.execute(() -> {
+        try { executor.execute(() -> {
             try {
                 URL source = new URL(url);
                 if (!"https".equalsIgnoreCase(source.getProtocol()) || source.getUserInfo() != null || source.getHost().isEmpty()) throw new IOException("Valid HTTPS download URL required");
@@ -72,7 +72,10 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (activeDownloads.decrementAndGet() == 0)
                     getContext().stopService(new Intent(getContext(), DownloadForegroundService.class));
             }
-        });
+        }); } catch (RejectedExecutionException error) {
+            if (activeDownloads.decrementAndGet() == 0) getContext().stopService(new Intent(getContext(), DownloadForegroundService.class));
+            call.reject("Download queue unavailable", error);
+        }
     }
 
     @PluginMethod
@@ -141,6 +144,7 @@ public class ResumableDownloadPlugin extends Plugin {
         sendProgress(offset, -1);
         IOException lastFailure = null;
         int successfulSegments = 0;
+        boolean rangeReset = false;
         for (int attempt = 0; attempt < 5; attempt++) {
             HttpURLConnection c = null;
             try {
@@ -151,6 +155,8 @@ public class ResumableDownloadPlugin extends Plugin {
 
                 if (code == 416 && offset > 0) {
                     if (matches(partial, checksum)) return;
+                    if (rangeReset) throw new IOException("Server repeatedly rejected resume range");
+                    rangeReset = true;
                     if (!partial.delete()) throw new IOException("Cannot reset invalid partial download");
                     offset = 0;
                     attempt--;
