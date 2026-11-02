@@ -49,6 +49,26 @@ public class ResumableDownloadPlugin extends Plugin {
         });
     }
 
+    @PluginMethod
+    public void releaseArchive(PluginCall call) {
+        String sha = call.getString("checksum");
+        if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) {
+            call.reject("Invalid SHA-256"); return;
+        }
+        executor.execute(() -> {
+            try {
+                File dir = new File(getContext().getFilesDir(), "resumable-bundles");
+                File archive = new File(dir, sha.toLowerCase(Locale.ROOT) + ".zip");
+                synchronized (this) {
+                    if (server != null) { server.close(); server = null; }
+                    serverToken = null;
+                }
+                if (archive.exists() && !archive.delete()) throw new IOException("Could not remove imported archive");
+                call.resolve();
+            } catch (Exception error) { call.reject("Archive cleanup failed", error); }
+        });
+    }
+
     private void fetch(URL url, File partial, String checksum) throws Exception {
         long offset = partial.exists() ? partial.length() : 0;
         for (int attempt = 0; attempt < 5; attempt++) {
