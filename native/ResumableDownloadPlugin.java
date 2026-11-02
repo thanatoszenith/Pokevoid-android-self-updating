@@ -71,64 +71,85 @@ public class ResumableDownloadPlugin extends Plugin {
 
     private void fetch(URL url, File partial, String checksum) throws Exception {
         long offset = partial.exists() ? partial.length() : 0;
-        // A killed process may leave a fully downloaded archive with its .part name.
         if (offset > 0 && matches(partial, checksum)) return;
+        IOException lastFailure = null;
         for (int attempt = 0; attempt < 5; attempt++) {
-            HttpURLConnection c = (HttpURLConnection) url.openConnection();
-            c.setConnectTimeout(20000); c.setReadTimeout(30000);
-            c.setInstanceFollowRedirects(true);
-            c.setRequestProperty("Accept-Encoding", "identity");
-            if (offset > 0) c.setRequestProperty("Range", "bytes=" + offset + "-");
-            int code = c.getResponseCode();
-            if (!"https".equalsIgnoreCase(c.getURL().getProtocol())) throw new IOException("Redirect to non-HTTPS URL refused");
-            if (code == 416 && offset > 0) {
-                // A partial file may already be complete after an interrupted final response.
-                c.disconnect();
-                if (matches(partial, checksum)) return;
-                partial.delete(); offset = 0; continue;
-            }
-            if (code != 200 && code != 206) throw new IOException("HTTP " + code);
-            if (offset == 0 && code == 206) throw new IOException("Unexpected partial response without range request");
-            long declaredTotal = -1;
-            if (offset > 0 && code == 206) {
-                String range = c.getHeaderField("Content-Range");
-                if (range == null || !range.matches("bytes " + offset + "-[0-9]+/[0-9]+")) {
-                    c.disconnect(); partial.delete(); offset = 0; continue;
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) url.openConnection();
+                c.setConnectTimeout(20000);
+                c.setReadTimeout(30000);
+                c.setInstanceFollowRedirects(true);
+                c.setRequestProperty("Accept-Encoding", "identity");
+                if (offset > 0) c.setRequestProperty("Range", "bytes=" + offset + "-");
+                int code = c.getResponseCode();
+                if (!"https".equalsIgnoreCase(c.getURL().getProtocol())) throw new IOException("Non-HTTPS redirect refused");
+                if (code == 416 && offset > 0) {
+                    if (matches(partial, checksum)) return;
+                    if (!partial.delete()) throw new IOException("Cannot reset invalid partial download");
+                    offset = 0;
+                    continue;
                 }
-                String[] bounds = range.substring(6).split("[-/]");
-                long end = Long.parseLong(bounds[1]);
-                declaredTotal = Long.parseLong(bounds[2]);
-                if (end < offset || declaredTotal <= end) {
-                    c.disconnect(); partial.delete(); offset = 0; continue;
-                }
-            } else if (offset > 0) {
-                partial.delete(); offset = 0;
-            }
-            if (c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) throw new IOException("Encoded download response refused");
-            long remaining = c.getContentLengthLong();
-            if (declaredTotal >= 0 && remaining >= 0 && remaining != declaredTotal - offset) throw new IOException("Inconsistent Content-Range and Content-Length");
-            long total = declaredTotal >= 0 ? declaredTotal : remaining >= 0 ? offset + remaining : -1;
-            try (InputStream input = c.getInputStream(); FileOutputStream output = new FileOutputStream(partial, offset > 0)) {
-                byte[] buf = new byte[65536]; int n; long done = offset; long lastEvent = 0;
-                while ((n = input.read(buf)) != -1) {
-                    output.write(buf, 0, n); done += n;
-                    long now = System.currentTimeMillis();
-                    if (now - lastEvent >= 300) {
-                        JSObject event = new JSObject();
-                        event.put("downloaded", done); event.put("total", total);
-                        notifyListeners("progress", event);
-                        lastEvent = now;
+                if (code != 200 && code != 206) throw new IOException("HTTP " + code);
+                if (offset == 0 && code == 206) throw new IOException("Unexpected partial response");
+                long total = c.getContentLengthLong();
+                if (offset > 0 && code == 206) {
+                    String range = c.getHeaderField("Content-Range");
+                    if (range == null || !range.matches("bytes " + offset + "-[0-9]+/[0-9]+")) {
+                        throw new IOException("Invalid Content-Range for resumed download");
                     }
+                    String[] bounds = range.substring(6).split("[-/]");
+                    long end = Long.parseLong(bounds[1]);
+                    long declaredTotal = Long.parseLong(bounds[2]);
+                    if (end < offset || declaredTotal <= end || end != declaredTotal - 1) {
+                        throw new IOException("Incomplete or invalid resumed range");
+                    }
+                    if (total >= 0 && total != end - offset + 1) throw new IOException("Inconsistent Content-Range and Content-Length");
+                    total = declaredTotal;
+                } else if (offset > 0) {
+                    // The server ignored Range: restart from byte zero.
+                    offset = 0;
                 }
-                output.getFD().sync();
+                if (c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) {
+                    throw new IOException("Encoded download response refused");
+                }
+                long done = offset;
+                long lastEvent = 0;
+                try (InputStream input = c.getInputStream();
+                     FileOutputStream output = new FileOutputStream(partial, offset > 0)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = input.read(buf)) != -1) {
+                        if (total >= 0 && (long)n > total - done) throw new IOException("Response exceeded advertised size");
+                        output.write(buf, 0, n);
+                        done += n;
+                        long now = System.currentTimeMillis();
+                        if (now - lastEvent >= 300) {
+                            JSObject event = new JSObject();
+                            event.put("downloaded", done);
+                            event.put("total", total);
+                            notifyListeners("progress", event);
+                            lastEvent = now;
+                        }
+                    }
+                    output.getFD().sync();
+                }
+                offset = done;
                 JSObject event = new JSObject();
-                event.put("downloaded", done); event.put("total", total);
+                event.put("downloaded", done);
+                event.put("total", total);
                 notifyListeners("progress", event);
                 if (total >= 0 && done != total) throw new IOException("Incomplete HTTP response");
-            } finally { c.disconnect(); }
-            return;
+                return;
+            } catch (IOException error) {
+                lastFailure = error;
+                offset = partial.exists() ? partial.length() : 0;
+                if (offset > 0 && matches(partial, checksum)) return;
+            } finally {
+                if (c != null) c.disconnect();
+            }
         }
-        throw new IOException("Server returned incompatible range responses");
+        throw new IOException("Download interrupted after retries; partial data preserved", lastFailure);
     }
 
     private boolean matches(File file, String checksum) throws Exception {
