@@ -134,6 +134,7 @@ public class ResumableDownloadPlugin extends Plugin {
         // Report resumed bytes before the next network read, so the UI never starts at zero.
         sendProgress(offset, -1);
         IOException lastFailure = null;
+        int successfulSegments = 0;
         for (int attempt = 0; attempt < 5; attempt++) {
             HttpURLConnection c = null;
             try {
@@ -146,6 +147,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     if (matches(partial, checksum)) return;
                     if (!partial.delete()) throw new IOException("Cannot reset invalid partial download");
                     offset = 0;
+                    attempt--;
                     continue;
                 }
                 if (code != 200 && code != 206) throw new IOException("HTTP " + code);
@@ -182,6 +184,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     int n;
                     while ((n = input.read(buf)) != -1) {
                         if (total >= 0 && (long)n > total - done) throw new IOException("Response exceeded advertised size");
+                        if (responseEnd >= 0 && (long)n > responseEnd + 1 - done) throw new IOException("Response exceeded declared Content-Range");
                         output.write(buf, 0, n);
                         done += n;
                         long now = System.currentTimeMillis();
@@ -196,9 +199,11 @@ public class ResumableDownloadPlugin extends Plugin {
                 sendProgress(done, total);
                 if (responseEnd >= 0 && done != responseEnd + 1) throw new IOException("Incomplete resumed range response");
                 if (total >= 0 && done != total) {
+                    if (code == 200) throw new IOException("Incomplete full HTTP response");
                     // A server may send a valid bounded range instead of the entire remaining suffix.
                     // Request the next range rather than treating a valid segment as a failure.
                     offset = done;
+                    if (++successfulSegments > 8192) throw new IOException("Too many bounded range responses");
                     // Bounded partial responses are progress, not failed attempts.
                     attempt--;
                     continue;
