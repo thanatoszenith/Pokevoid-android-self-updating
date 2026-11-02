@@ -85,3 +85,11 @@ test('HTTP 416 response uses CRLF escapes, not escaped backslash characters', ()
   assert.ok(line.includes(String.raw`\r\nContent-Range`));
   assert.ok(!line.includes(String.raw`\\r\\nContent-Range`));
 });
+
+test('network failures retain partial downloads for subsequent HTTP Range retries', () => {
+  assert.match(native, /Download interrupted after retries; partial data preserved/);
+  assert.match(native, /offset = partial\.exists\(\) \? partial\.length\(\) : 0/);
+  assert.match(native, /if \(c != null\) c\.disconnect\(\)/);
+  assert.match(native, /Response exceeded advertised size/);
+  assert.match(native, /end != declaredTotal - 1/);
+});
