@@ -15,7 +15,7 @@ test('both installation flows stage, release the single archive, activate, then 
 });
 test('WebView uses external HTTPS file hosting, a launch watchdog and scoped confirmation', () => {
   const source = fs.readFileSync('native/ExternalGamePlugin.java','utf8');
-  for (const marker of ['setServerBasePath(base)', 'setServerAssetPath("public")', 'WebSettings.LOAD_NO_CACHE', '180000', 'launchId.equals', 'storage().recover()', 'storage().confirm()']) assert.ok(source.includes(marker), marker);
+  for (const marker of ['setServerBasePath(base.getPath())', 'setServerAssetPath("public")', 'WebSettings.LOAD_NO_CACHE', '180000', 'launchId.equals', 'storage().recover()', 'storage().confirm()']) assert.ok(source.includes(marker), marker);
   const ready = fs.readFileSync('patches/native-launch.ts','utf8');
   assert.ok(ready.includes("game.events.once('pokevoid-native-ready'"));
   assert.ok(fs.readFileSync('patches/apply.mjs','utf8').includes('signalTitleComposed(): void {'));
@@ -26,4 +26,27 @@ test('build copies every native class and does not install the private updater',
   assert.ok(workflow.includes("! grep -Rq 'capacitor-updater'"));
   assert.ok(workflow.includes('registerPlugin(ExternalGamePlugin.class)'));
   assert.doesNotMatch(workflow, /permission+'\\\\n/);
+});
+
+test('native save transport is frame-origin checked and does not expose a raw JavaScript interface',()=>{
+  const loader=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  const chrome=fs.readFileSync('native/NativeSaveChromeClient.java','utf8');
+  const direct=fs.readFileSync('native/DirectSaveBridge.java','utf8');
+  assert.doesNotMatch(loader,/addJavascriptInterface/);assert.doesNotMatch(direct,/@JavascriptInterface/);
+  assert.ok(chrome.includes('TrustedGameOrigin.accepts(url)'));
+  assert.ok(chrome.includes('writer.execute('));assert.ok(chrome.includes('result.confirm(error)'));
+  const workflow=fs.readFileSync('.github/workflows/build.yml','utf8');
+  assert.ok(workflow.indexOf('super.onCreate(savedInstanceState)')<workflow.indexOf('saveClient = new NativeSaveChromeClient'));
+  assert.ok(workflow.includes('saveClient.close()'));
+});
+test('all launches have a readiness timeout and reuse the validated base directory for asset requests',()=>{
+  const loader=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  assert.ok(loader.includes('waiting = true'));
+  assert.ok(loader.includes('if (waiting) rollback()'));
+  assert.ok(loader.includes('File base = activeBase'));
+});
+
+test('save compatibility is injected before either old or new game scripts run',()=>{
+  const loader=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  assert.ok(loader.includes('getBridge().injectScriptBeforeLoad("save-compat.js")'));
 });

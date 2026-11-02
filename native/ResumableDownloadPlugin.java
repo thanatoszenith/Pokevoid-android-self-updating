@@ -9,7 +9,6 @@ import java.io.*;
 import android.content.Intent;
 import androidx.core.content.ContextCompat;
 import java.net.*;
-import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
@@ -47,8 +46,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (verifiedComplete) sendProgress(complete.length(), complete.length());
                 if (!verifiedComplete) {
                     if (complete.exists() && !complete.delete()) throw new IOException("Cannot replace corrupt cached archive");
-                    fetch(source, partial, key);
-                    if (!matches(partial, key)) {
+                    if (!fetch(source, partial, key) && !matches(partial, key)) {
                         partial.delete();
                         throw new IOException("Downloaded ZIP checksum mismatch");
                     }
@@ -124,14 +122,15 @@ public class ResumableDownloadPlugin extends Plugin {
         throw new IOException("Too many download redirects");
     }
 
-    private void fetch(URL url, File partial, String checksum) throws Exception {
+    private boolean fetch(URL url, File partial, String checksum) throws Exception {
         long offset = partial.exists() ? partial.length() : 0;
         if (offset > 0 && matches(partial, checksum)) {
             sendProgress(offset, offset);
-            return;
+            return true;
         }
         // Report resumed bytes before the next network read, so the UI never starts at zero.
         sendProgress(offset, -1);
+        long expectedTotal = -1;
         IOException lastFailure = null;
         int successfulSegments = 0;
         boolean rangeReset = false;
@@ -144,7 +143,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 int code = c.getResponseCode();
 
                 if (code == 416 && offset > 0) {
-                    if (matches(partial, checksum)) return;
+                    if (matches(partial, checksum)) return true;
                     if (rangeReset) throw new IOException("Server repeatedly rejected resume range");
                     rangeReset = true;
                     if (!partial.delete()) throw new IOException("Cannot reset invalid partial download");
@@ -175,6 +174,8 @@ public class ResumableDownloadPlugin extends Plugin {
                     // The server ignored Range: restart from byte zero.
                     offset = 0;
                 }
+                if (total > DownloadCache.MAX_BYTES) throw new IOException("Archive exceeds download limit");
+                expectedTotal = total;
                 if (c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) {
                     throw new IOException("Encoded download response refused");
                 }
@@ -212,11 +213,11 @@ public class ResumableDownloadPlugin extends Plugin {
                     attempt--;
                     continue;
                 }
-                return;
+                return false;
             } catch (IOException error) {
                 lastFailure = error;
                 offset = partial.exists() ? partial.length() : 0;
-                if (offset > 0 && matches(partial, checksum)) return;
+                if (DownloadCache.mayBeComplete(offset, expectedTotal) && matches(partial, checksum)) return true;
                 if (attempt < 4) {
                     try { Thread.sleep(Math.min(500L * (1L << attempt), 4000L)); }
                     catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IOException("Download interrupted", interrupted); }
@@ -238,16 +239,8 @@ public class ResumableDownloadPlugin extends Plugin {
     }
 
     private boolean matches(File file, String checksum) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        try (InputStream in = new FileInputStream(file)) {
-            byte[] b = new byte[65536]; int n;
-            while ((n = in.read(b)) != -1) md.update(b, 0, n);
-        }
-        StringBuilder hex = new StringBuilder();
-        for (byte b : md.digest()) hex.append(String.format(Locale.ROOT, "%02x", b & 0xff));
-        return hex.toString().equals(checksum);
+        return ExternalGameStorage.matches(file, checksum);
     }
-
 
     @Override protected void handleOnDestroy() { executor.shutdown(); }
 }

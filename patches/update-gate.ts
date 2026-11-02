@@ -1,11 +1,9 @@
 import { ResumableDownload } from './resumable-download';
-import { configureSharedStorage } from './shared-storage';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
-import { ExternalGame } from './external-game';
+import { ExternalGame, type ExternalState } from './external-game';
 
 const FEED = '__POKEVOID_UPDATE_FEED__';
-const BUNDLED_VERSION = '__POKEVOID_VERSION__';
 const REQUEST_TIMEOUT_MS = 3000;
 const RESUME_KEY = 'pokevoid_pending_update';
 type Release = { version: string; url: string; checksum: string; features: string[] };
@@ -34,11 +32,7 @@ function trustedGameAsset(feedUrl: string, assetUrl: string, version: string): b
   } catch { return false; }
 }
 
-async function installedVersion(): Promise<string> {
-  return (await ExternalGame.status()).version;
-}
-
-async function checkRelease(): Promise<Release | null> {
+async function checkRelease(state: ExternalState): Promise<Release | null> {
   try {
     const data = await readUpdateFeed(FEED, REQUEST_TIMEOUT_MS);
     if (!data || typeof data !== 'object') return null;
@@ -48,8 +42,8 @@ async function checkRelease(): Promise<Release | null> {
     // Fail closed: never activate an update without the offline daily contract.
     if (!Array.isArray(r.features) || !r.features.includes('offline-daily-v1') || !r.features.includes('official-daily-cache-v1') || !r.features.includes('external-game-v1')) return null;
     if (!trustedGameAsset(FEED, r.url, r.version)) return null;
-    if ((await ExternalGame.status()).failedChecksum === r.checksum.toLowerCase()) return null;
-    return compareVersions(r.version, await installedVersion()) === 1 ? r as Release : null;
+    if (state.failedChecksum === r.checksum.toLowerCase()) return null;
+    return compareVersions(r.version, state.version) === 1 ? r as Release : null;
   } catch (error) { console.warn('[UpdateGate] Offline or update check failed', error); return null; }
 }
 
@@ -65,8 +59,9 @@ function showOverlay(): { message: (s: string) => void; remove: () => void } {
 export async function updateBeforeGame(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true;
 
-  if ((await ExternalGame.status()).pending) return true;
-  const release = await checkRelease();
+  const state = await ExternalGame.status();
+  if (state.pending) return true;
+  const release = await checkRelease(state);
   if (!release) return true;
   let resume = false;
   try {

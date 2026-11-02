@@ -16,10 +16,11 @@ public class ExternalGamePlugin extends Plugin {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean launched;
+    private volatile File activeBase;
     private volatile boolean loadFailed;
     private volatile boolean waiting;
     private volatile String launchId = "";
-    private final Runnable timeout = () -> rollback();
+    private final Runnable timeout = () -> { if (waiting) rollback(); };
     private ExternalGameStorage storage() throws IOException {
         if (Build.VERSION.SDK_INT < 30 || !Environment.isExternalStorageManager())
             throw new IOException("Enable All files access to use PokeVoid/Game");
@@ -27,20 +28,22 @@ public class ExternalGamePlugin extends Plugin {
     }
     interface Action { void run() throws Exception; }
     private void execute(PluginCall call, Action action) {
-        worker.execute(() -> {
-            try { action.run(); } catch (Exception e) { call.reject(e.getMessage(), e); }
-        });
+        try {
+            worker.execute(() -> {
+                try { action.run(); } catch (Exception e) { call.reject(e.getMessage(), e); }
+            });
+        } catch (RejectedExecutionException stopped) { call.reject("Activity is closing", stopped); }
     }
     @Override public void load() {
+        getBridge().injectScriptBeforeLoad("save-compat.js");
         ui.post(() -> {
-            getBridge().getWebView().addJavascriptInterface(new DirectSaveBridge(), "PokeVoidSaves");
             getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     if (launched && "localhost".equals(request.getUrl().getHost())) {
                         try {
                             String path = request.getUrl().getPath();
-                            File base = storage().current().getCanonicalFile();
+                            File base = activeBase;
                             File target = new File(base, path.startsWith("/") ? path.substring(1) : path).getCanonicalFile();
                             if (path.startsWith("/_capacitor_file_") || path.startsWith("/_capacitor_content_")
                                 || !(target.equals(base) || target.getPath().startsWith(base.getPath() + File.separator)))
@@ -95,14 +98,15 @@ public class ExternalGamePlugin extends Plugin {
         execute(call, () -> {
             ExternalGameStorage s = storage();
             if (!s.installed()) throw new IOException("No external game installed");
-            String base = s.current().getCanonicalPath();
-            waiting = s.pending();
+            File base = s.current().getCanonicalFile();
+            waiting = true;
             launchId = java.util.UUID.randomUUID().toString();
             ui.post(() -> {
                 getBridge().getWebView().stopLoading();
                 getBridge().getWebView().clearCache(true);
-                launched = true; loadFailed = false;
-                getBridge().setServerBasePath(base);
+                ui.removeCallbacks(timeout);
+                activeBase = base; launched = true; loadFailed = false;
+                getBridge().setServerBasePath(base.getPath());
                 if (waiting) ui.postDelayed(timeout, 180000);
             });
             call.resolve();

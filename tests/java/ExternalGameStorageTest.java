@@ -30,6 +30,14 @@ public final class ExternalGameStorageTest {
     public static void main(String[] args) throws Exception {
         File base = Files.createTempDirectory("pokevoid-storage-").toFile();
         try {
+            check(TrustedGameOrigin.accepts("https://localhost/"),"local origin accepted");
+            check(TrustedGameOrigin.accepts("https://localhost:443/path"),"default secure port accepted");
+            for (String url : new String[]{null,"http://localhost/","https://localhost.evil/","https://evil@localhost/","https://localhost:444/","file:///x","https://evil/","not a url"})
+                check(!TrustedGameOrigin.accepts(url),"untrusted origin rejected: "+url);
+            check(!DownloadCache.mayBeComplete(10,100),"short network response is not hashed");
+            check(DownloadCache.mayBeComplete(100,100),"complete response is verified");
+            check(DownloadCache.mayBeComplete(100,-1),"unknown length can be complete");
+            check(!DownloadCache.mayBeComplete(0,-1),"empty partial skipped");
             File archive = zip(base,"valid.zip","index.html","assets/main.js");
             File root = new File(base,"game");
             ExternalGameStorage store = oldGame(root);
@@ -63,6 +71,17 @@ public final class ExternalGameStorageTest {
                 x.recover(); x.recover();
                 check(x.version().equals("1"),"crash phase "+phase);
             }
+            File oversized = new File(base,"oversized"); ExternalGameStorage bounded = oldGame(oversized);
+            marker(new File(oversized,"current"),".version","9".repeat(1024));
+            fails(() -> bounded.version());
+            marker(new File(oversized,"current"),".version","1");
+            marker(oversized,".pending","invalid");
+            fails(() -> bounded.recover());
+            check(bounded.installed(),"invalid journal never erases active assets");
+            fails(() -> bounded.stage(archive,sha(archive),"2"));
+            File blocked = new File(base,"blocked"); ExternalGameStorage locked = oldGame(blocked);
+            marker(blocked,".rollback","old"); fails(() -> locked.stage(archive,sha(archive),"2"));
+            check(locked.version().equals("1"),"staging cannot overwrite an unresolved rollback");
             File firstRoot = new File(base,"first"); ExternalGameStorage first = new ExternalGameStorage(firstRoot);
             first.stage(archive,sha(archive),"2"); first.activate(sha(archive)); first.recover(); first.recover();
             check(!first.installed(),"bad first install removed");

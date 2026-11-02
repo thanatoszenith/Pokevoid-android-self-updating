@@ -147,7 +147,7 @@ test('bootstrap resumes a previously initiated download after process restart', 
   assert.match(bootstrap, /pokevoid_pending_bootstrap_download/);
   assert.match(bootstrap, /localStorage\.setItem\(RESUME_KEY/);
   assert.match(bootstrap, /pending\?\.version === latest\.version && pending\?\.checksum === latest\.checksum/);
-  assert.match(bootstrap, /void exclusive\(install\)/);
+  assert.ok(bootstrap.includes("await install();"));
   assert.match(bootstrap, /localStorage\.removeItem\(RESUME_KEY\)/);
 });
 
@@ -199,4 +199,9 @@ test('repeated HTTP 416 responses cannot cause an endless retry loop', () => {
 test('executor rejection releases foreground download accounting', () => {
   assert.match(native, /catch \(RejectedExecutionException error\)/);
   assert.match(native, /call\.reject\("Download queue unavailable", error\)/);
+});
+
+test('network retry hashing skips known-short archives and reuses verified complete partials',()=>{
+  assert.ok(native.includes('DownloadCache.mayBeComplete(offset, expectedTotal)'));
+  assert.ok(native.includes('!fetch(source, partial, key) && !matches(partial, key)'));
 });

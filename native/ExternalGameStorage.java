@@ -15,12 +15,28 @@ public final class ExternalGameStorage {
     public File current() { return file("current"); }
     public boolean installed() { return new File(current(), "index.html").isFile(); }
     public boolean pending() { return file(".pending").exists(); }
+    private static String metadata(File file, int limit) throws IOException {
+        try (InputStream in = new FileInputStream(file); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[128]; int n;
+            while ((n = in.read(buffer)) != -1) {
+                if (n > limit - out.size()) throw new IOException("Game metadata exceeds limit: " + file.getName());
+                out.write(buffer, 0, n);
+            }
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
     public String failedChecksum() throws IOException {
-        return file(".failed").isFile() ? new String(Files.readAllBytes(file(".failed").toPath()), StandardCharsets.UTF_8) : "";
+        if (!file(".failed").isFile()) return "";
+        String value = metadata(file(".failed"), 64);
+        if (!value.matches("[a-fA-F0-9]{64}")) throw new IOException("Invalid failed checksum");
+        return value.toLowerCase(Locale.ROOT);
     }
     public String version() throws IOException {
         File meta = new File(current(), ".version");
-        return meta.isFile() ? new String(Files.readAllBytes(meta.toPath()), StandardCharsets.UTF_8) : "0";
+        if (!meta.isFile()) return "0";
+        String value = metadata(meta, 128);
+        if (!value.matches("[0-9]+(\\.[0-9]+)*")) throw new IOException("Invalid game version");
+        return value;
     }
     private void ensureRoot() throws IOException {
         if (!root.isDirectory() && !root.mkdirs()) throw new IOException("Cannot create external game directory");
@@ -41,10 +57,11 @@ public final class ExternalGameStorage {
         return hex.toString().equalsIgnoreCase(expected);
     }
     public synchronized void stage(File archive, String sha, String version) throws Exception {
-        if (sha == null || !sha.matches("[a-fA-F0-9]{64}") || version == null || !version.matches("[0-9]+(\\.[0-9]+)*"))
+        if (sha == null || !sha.matches("[a-fA-F0-9]{64}") || version == null || version.length() > 128 || !version.matches("[0-9]+(\\.[0-9]+)*"))
             throw new IOException("Invalid game metadata");
         ensureRoot();
-        if (pending()) throw new IOException("Launch confirmation pending");
+        if (pending() || file(".rollback").exists() || file(".confirmed").exists() || file(".previous").exists())
+            throw new IOException("Game recovery or confirmation pending");
         if (!matches(archive, sha)) throw new IOException("Game archive SHA-256 mismatch");
         File staging = file(".staging");
         removeTree(staging);
@@ -87,9 +104,9 @@ public final class ExternalGameStorage {
         File staged = file(".staging"), previous = file(".previous");
         File checksum = new File(staged, ".checksum");
         if (!new File(staged, "index.html").isFile() || !checksum.isFile()
-            || !new String(Files.readAllBytes(checksum.toPath()), StandardCharsets.UTF_8).equalsIgnoreCase(sha))
+            || !metadata(checksum, 64).equalsIgnoreCase(sha))
             throw new IOException("Staged game does not match requested update");
-        if (pending() || previous.exists() || file(".confirmed").exists()) throw new IOException("Recovery pending");
+        if (pending() || previous.exists() || file(".confirmed").exists() || file(".rollback").exists()) throw new IOException("Recovery pending");
         write(file(".pending"), current().exists() ? "old" : "new");
         try {
             if (current().exists() && !current().renameTo(previous)) throw new IOException("Cannot preserve current game");
@@ -108,13 +125,16 @@ public final class ExternalGameStorage {
         if (file(".confirmed").exists()) { removeTree(previous); removeTree(file(".confirmed")); }
         else {
             if (pending()) {
+                String kind = metadata(file(".pending"), 3);
+                if (!kind.equals("old") && !kind.equals("new")) throw new IOException("Invalid activation journal");
                 File checksum = new File(current(), ".checksum");
                 if (!file(".staging").exists() && checksum.isFile())
-                    write(file(".failed"), new String(Files.readAllBytes(checksum.toPath()), StandardCharsets.UTF_8));
+                    write(file(".failed"), metadata(checksum, 64));
                 if (!file(".pending").renameTo(file(".rollback"))) throw new IOException("Cannot journal rollback");
             }
             if (file(".rollback").exists()) {
-                String kind = new String(Files.readAllBytes(file(".rollback").toPath()), StandardCharsets.UTF_8);
+                String kind = metadata(file(".rollback"), 3);
+                if (!kind.equals("old") && !kind.equals("new")) throw new IOException("Invalid rollback journal");
                 if (previous.exists()) {
                     removeTree(current());
                     if (!previous.renameTo(current())) throw new IOException("Cannot restore previous game");

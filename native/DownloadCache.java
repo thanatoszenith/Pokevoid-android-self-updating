@@ -6,6 +6,10 @@ import java.util.*;
 public final class DownloadCache {
     public static final long MAX_BYTES = 4L * 1024 * 1024 * 1024;
     public static final long MAX_AGE_MS = 48L * 60 * 60 * 1000;
+    /** Avoid rereading a large partial archive after every known-short network response. */
+    public static boolean mayBeComplete(long bytes, long total) {
+        return bytes > 0 && (total < 0 || bytes == total);
+    }
     public static synchronized void clean(File dir, String keep) throws IOException {
         File[] files = dir.listFiles((d, n) -> n.matches("[a-f0-9]{64}\\.(part|zip)"));
         if (files == null) return;

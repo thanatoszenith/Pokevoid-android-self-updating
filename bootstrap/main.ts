@@ -13,11 +13,9 @@ const button = document.getElementById('install') as HTMLButtonElement;
 const progressArea = document.getElementById('progress-area') as HTMLDivElement;
 const progressBar = document.getElementById('download-progress') as HTMLProgressElement;
 const progressDetails = document.getElementById('download-details') as HTMLDivElement;
-let downloadStarted = 0;
 let lastSampleTime = 0;
 let lastSampleBytes = 0;
 let smoothedSpeed = 0;
-let lastDownloaded = 0;
 let lastTotal = 0;
 const formatBytes = (bytes: number) => bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(2)} GiB` : `${(bytes / 1048576).toFixed(1)} MiB`;
 function formatDuration(seconds: number): string {
@@ -25,11 +23,9 @@ function formatDuration(seconds: number): string {
   return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.floor(n % 3600 / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
 }
 function resetProgress() {
-  downloadStarted = Date.now();
   lastSampleTime = 0;
   lastSampleBytes = 0;
   smoothedSpeed = 0;
-  lastDownloaded = 0;
   lastTotal = 0;
   progressArea.hidden = false;
   progressBar.removeAttribute('value');
@@ -53,7 +49,6 @@ function showProgress(downloaded: number, total: number) {
     lastSampleTime = now;
     lastSampleBytes = done;
   }
-  lastDownloaded = done;
   if (Number.isFinite(total) && total > 0) lastTotal = total;
   progressArea.hidden = false;
   if (lastTotal > 0) {
@@ -176,11 +171,17 @@ async function main() {
     }
   };
   retry('Download game', install);
+  const failedChecksum = (await ExternalGame.status()).failedChecksum;
+  if (failedChecksum === latest.checksum.toLowerCase()) {
+    localStorage.removeItem(RESUME_KEY);
+    status.textContent = 'The last installation did not finish loading. You can retry the download manually.';
+    return;
+  }
   try {
     const pending = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null');
     if (pending?.version === latest.version && pending?.checksum === latest.checksum) {
       status.textContent = 'Resuming interrupted game download…';
-      void exclusive(install);
+      await install();
     }
   } catch (error) { console.warn('Invalid pending download marker', error); localStorage.removeItem(RESUME_KEY); }
 }

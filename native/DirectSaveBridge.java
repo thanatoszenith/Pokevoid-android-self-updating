@@ -1,7 +1,6 @@
 package com.zenni.pokevoid;
 import android.os.Build;
 import android.os.Environment;
-import android.webkit.JavascriptInterface;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -10,10 +9,13 @@ import org.json.JSONObject;
 
 /** Synchronous Storage API contract: a save returns only after its external record is durable. */
 public final class DirectSaveBridge {
-    @JavascriptInterface public synchronized String write(String key, String value) {
+    public String status() {
+        return Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager() ? "" : "External storage unavailable";
+    }
+    public synchronized String write(String key, String value) {
         return change(key, value);
     }
-    @JavascriptInterface public synchronized String remove(String key) { return change(key, null); }
+    public synchronized String remove(String key) { return change(key, null); }
     private String change(String key, String value) {
         File temp = null;
         try {

@@ -24,7 +24,7 @@ Activation writes a journal before renaming `current` to `.previous` and staging
 to `current`. Every startup recovers unfinished transactions. The deferred title-screen
 composition signal confirms a launch using the native launch ID; an HTML load alone does
 not count. Confirmation commits the journal before removing the previous directory.
-A failed WebView load or a three-minute foreground launch timeout restores the old
+Every launch has a readiness watchdog. A failed WebView load or a three-minute foreground launch timeout restores the old
 game and returns to the bootstrap. A process killed before confirmation rolls back
 on next launch. Failed checksums are excluded from automatic update offers.
 
@@ -37,7 +37,10 @@ during a power loss still depends on Android's underlying storage.
 ## Saves and caches
 
 Save records are written directly to `PokeVoid/Saves` using a synchronous native
-bridge, flushed and atomically renamed before JavaScript returns. Reads use a memory
+transport, flushed and atomically renamed before JavaScript returns. The native
+handler checks the requesting frame origin and runs disk operations on a dedicated
+writer thread. A small injected JavaScript shim preserves older installed games
+without exposing a raw Java interface to every WebView frame. Reads use a memory
 snapshot. Failed writes throw without changing that snapshot. Preferences and
 sessionStorage retain normal browser behavior. Existing internal saves are migrated
 before gameplay, and only then removed from internal storage. Conflicting legacy
@@ -77,3 +80,14 @@ exercise external save migration/write failures, and verify publication and pack
 The generated Android build is verified by GitHub Actions. A physical-device check
 of first install, offline relaunch, permission revocation, backgrounding and actual
 game rendering remains necessary before distributing a release-signed APK.
+
+## Audit improvements
+
+Interrupted first downloads now resume within the existing startup action, and a
+failed game checksum requires an explicit retry instead of automatically looping.
+All installed-game launches have a readiness timeout. External version, checksum
+and recovery metadata have strict read limits; invalid journals preserve the game
+for recovery. Each update check reads native state once, asset requests reuse their
+validated base directory, and known-short download retries avoid rereading the
+entire partial ZIP for SHA-256. A checksum already verified on a completed partial
+is reused through finalization.

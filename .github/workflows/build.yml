@@ -92,10 +92,10 @@ jobs:
           source=activity.read_text()
           if 'registerPlugin(ResumableDownloadPlugin.class)' not in source:
               if 'import com.getcapacitor.BridgeActivity;' not in source: raise RuntimeError('Cannot locate BridgeActivity import')
-              source=source.replace('import com.getcapacitor.BridgeActivity;', 'import com.getcapacitor.BridgeActivity;\nimport com.zenni.pokevoid.ResumableDownloadPlugin;\nimport com.zenni.pokevoid.SharedStoragePlugin;\nimport com.zenni.pokevoid.ExternalGamePlugin;\nimport android.os.Bundle;')
+              source=source.replace('import com.getcapacitor.BridgeActivity;', 'import com.getcapacitor.BridgeActivity;\nimport com.zenni.pokevoid.ResumableDownloadPlugin;\nimport com.zenni.pokevoid.SharedStoragePlugin;\nimport com.zenni.pokevoid.ExternalGamePlugin;\nimport com.zenni.pokevoid.NativeSaveChromeClient;\nimport android.os.Bundle;')
               marker='public class MainActivity extends BridgeActivity {'
               if marker not in source: raise RuntimeError('Generated MainActivity layout changed')
-              source=source.replace(marker, marker+'\n  @Override public void onCreate(Bundle savedInstanceState) {\n    registerPlugin(ResumableDownloadPlugin.class);\n    registerPlugin(SharedStoragePlugin.class);\n    registerPlugin(ExternalGamePlugin.class);\n    getSharedPreferences("CapWebViewSettings", MODE_PRIVATE).edit().remove("serverBasePath").commit();\n    super.onCreate(savedInstanceState);\n  }')
+              source=source.replace(marker, marker+'\n  private NativeSaveChromeClient saveClient;\n  @Override public void onCreate(Bundle savedInstanceState) {\n    registerPlugin(ResumableDownloadPlugin.class);\n    registerPlugin(SharedStoragePlugin.class);\n    registerPlugin(ExternalGamePlugin.class);\n    getSharedPreferences("CapWebViewSettings", MODE_PRIVATE).edit().remove("serverBasePath").commit();\n    super.onCreate(savedInstanceState);\n    saveClient = new NativeSaveChromeClient(getBridge());\n    getBridge().getWebView().setWebChromeClient(saveClient);\n  }\n  @Override public void onDestroy() {\n    if (saveClient != null) saveClient.close();\n    super.onDestroy();\n  }')
           activity.write_text(source)
           PY
           # External files are served by the WebView HTTPS file host.

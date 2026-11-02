@@ -9,11 +9,23 @@ const Native = registerPlugin<{
 export const isGameSaveKey = (key: string): boolean =>
   /^(data_|sessionData(?:Battle)?[0-4]?_|data_backup_|runHistoryData_|starterPrefs_)/.test(key);
 
-export async function initializeDirectSaves(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
+let initialization: Promise<void> | undefined;
+export function initializeDirectSaves(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return Promise.resolve();
+  return initialization ??= installDirectSaves().catch(error => { initialization = undefined; throw error; });
+}
+
+async function installDirectSaves(): Promise<void> {
   if (!(await Native.status()).granted) throw new Error('External save access is required');
-  const bridge = (window as any).PokeVoidSaves as { write(key: string, value: string): string; remove(key: string): string };
-  if (!bridge) throw new Error('Direct external save bridge missing');
+  // New APKs inject a plain JS shim with origin-checked prompt transport.
+  // Already-installed APKs retain their legacy native object until the APK itself is upgraded.
+  const bridge = (window as any).PokeVoidSaves as {
+    write(key: string, value: string): string; remove(key: string): string; status?(): string;
+  };
+  if (!bridge || typeof bridge.write !== 'function' || typeof bridge.remove !== 'function')
+    throw new Error('Direct external save bridge unavailable');
+  const accessError = bridge.status?.();
+  if (accessError) throw new Error(accessError);
   const proto = Storage.prototype;
   const get = proto.getItem, set = proto.setItem, remove = proto.removeItem, clear = proto.clear, keyAt = proto.key;
   const lengthGetter = Object.getOwnPropertyDescriptor(proto, 'length')!.get!;

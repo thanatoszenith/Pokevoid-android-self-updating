@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 
-async function fixture({entries = [], legacy = {}, fail = false} = {}) {
+async function fixture({entries = [], legacy = {}, fail = false, unavailable = false, legacyBridge = false} = {}) {
   class Storage {
     constructor() { this.items = new Map(); }
     get length() { return this.items.size; }
@@ -18,18 +18,32 @@ async function fixture({entries = [], legacy = {}, fail = false} = {}) {
   for (const [k,v] of Object.entries(legacy)) localStorage.setItem(k,v);
   const disk = new Map(entries.map(e=>[e.key,e.value]));
   let failWrite = fail;
+  let reads = 0;
   const ctx = vm.createContext({Storage,localStorage, sessionStorage, DOMException, console,
     Capacitor: {isNativePlatform:()=>true},
-    registerPlugin:()=>({status:async()=>({granted:true}), readSaves:async()=>({entries}), writeSave:async({key,value})=>disk.set(key,value)}),
-    window:{PokeVoidSaves:{
-      write:(k,v)=>{if(failWrite)return 'disk full';disk.set(k,v);return '';},
-      remove:k=>{if(failWrite)return 'access revoked';disk.delete(k);return '';}
+    registerPlugin:()=>({status:async()=>({granted:true}), readSaves:async()=>{reads++;return {entries};}, writeSave:async({key,value})=>disk.set(key,value)}),
+    window:{location:{origin:'https://localhost'},prompt:(message,payload)=>{
+      assert.equal(message,'PokeVoidSaves/v1');
+      if(unavailable)return null;
+      const {operation,key,value}=JSON.parse(payload);
+      if(operation==='status')return '';
+      if(failWrite)return operation==='write'?'disk full':'access revoked';
+      if(operation==='write')disk.set(key,value);
+      else if(operation==='remove')disk.delete(key);
+      else throw new Error('Unexpected command');
+      return '';
     }}
+
   });
+  if (legacyBridge) ctx.window.PokeVoidSaves = {
+    write:(key,value)=>{disk.set(key,value);return '';},
+    remove:key=>{disk.delete(key);return '';}
+  };
   const source = fs.readFileSync('patches/direct-saves.ts','utf8').replace(/^import .*;$/m,'').replaceAll('export ','');
+  vm.runInContext(fs.readFileSync('bootstrap/public/save-compat.js','utf8'),ctx);
   vm.runInContext(stripTypeScriptTypes(source),ctx);
   await vm.runInContext('initializeDirectSaves()',ctx);
-  return {disk, localStorage, sessionStorage, setFailure:v=>{failWrite=v;}};
+  return {disk, localStorage, sessionStorage, setFailure:v=>{failWrite=v;}, reads:()=>reads, initialize:()=>vm.runInContext('initializeDirectSaves()',ctx)};
 }
 test('external saves win migration and game writes leave no internal disk copy',async()=>{
   const x=await fixture({entries:[{key:'data_slot',value:'external'}],legacy:{data_slot:'old',sessionData_1:'legacy',preference:'keep'}});
@@ -65,4 +79,25 @@ test('legacy internal recovery copies migrate externally before being removed',a
   const x=await fixture({legacy:{pokevoid_pre_external_data_slot:'recover'}});
   assert.equal(x.disk.get('data_backup_pre_external_data_slot'),'recover');
   assert.equal(x.localStorage.items.has('pokevoid_pre_external_data_slot'),false);
+});
+
+test('repeated initialization reuses one snapshot instead of stacking Storage hooks',async()=>{
+  const x=await fixture({entries:[{key:'data_slot',value:'safe'}]});
+  await Promise.all([x.initialize(),x.initialize()]);
+  assert.equal(x.reads(),1);x.localStorage.setItem('data_slot','updated');
+  assert.equal(x.disk.get('data_slot'),'updated');
+});
+test('missing native prompt transport fails before migrating or erasing legacy records',async()=>{
+  await assert.rejects(()=>fixture({legacy:{data_slot:'safe'},unavailable:true}),/bridge unavailable/);
+});
+
+test('game updates remain compatible with an already-installed legacy APK',async()=>{
+  const x=await fixture({legacyBridge:true,entries:[{key:'data_slot',value:'safe'}]});
+  x.localStorage.setItem('data_slot','updated');assert.equal(x.disk.get('data_slot'),'updated');
+});
+test('compatibility shim never installs save access into an unrelated origin',()=>{
+  let called=false;
+  const context=vm.createContext({window:{location:{origin:'https://unrelated.example'},prompt:()=>{called=true;}}});
+  vm.runInContext(fs.readFileSync('bootstrap/public/save-compat.js','utf8'),context);
+  assert.equal(context.window.PokeVoidSaves,undefined);assert.equal(called,false);
 });
