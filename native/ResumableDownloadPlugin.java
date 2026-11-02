@@ -102,7 +102,7 @@ public class ResumableDownloadPlugin extends Plugin {
             } else if (offset > 0) {
                 partial.delete(); offset = 0;
             }
-            if (offset > 0 && c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) throw new IOException("Encoded range response refused");
+            if (c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) throw new IOException("Encoded download response refused");
             long remaining = c.getContentLengthLong();
             if (declaredTotal >= 0 && remaining >= 0 && remaining != declaredTotal - offset) throw new IOException("Inconsistent Content-Range and Content-Length");
             long total = declaredTotal >= 0 ? declaredTotal : remaining >= 0 ? offset + remaining : -1;
