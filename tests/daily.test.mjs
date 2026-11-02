@@ -1,10 +1,12 @@
+import { zipFixture } from './zip-fixture.mjs';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-const patch = new URL('../patches/offline-daily.mjs', import.meta.url).pathname;
+const patch = fileURLToPath(new URL('../patches/offline-daily.mjs', import.meta.url));
 const original = `            if (!Utils.isLocal) {
                 fetchDailyRunSeed().then(seed => {
                     if (seed) {
@@ -51,9 +53,9 @@ test('compiled daily verifier rejects missing offline daily from game ZIP', asyn
   fs.mkdirSync(path.join(dir,'assets'));
   fs.writeFileSync(path.join(dir,'assets','main.js'), 'console.log("Official Online Daily", "daily/seed")');
   const zip=path.join(dir,'game.zip');
-  const packed=spawnSync('zip',['-q',zip,'assets/main.js'],{cwd:dir,encoding:'utf8'});
+  const packed=zipFixture(['-q',zip,'assets/main.js'],{cwd:dir,encoding:'utf8'});
   assert.equal(packed.status,0,packed.stderr);
-  const verifier=new URL('../scripts/verify-daily-bundle.mjs',import.meta.url).pathname;
+  const verifier=fileURLToPath(new URL('../scripts/verify-daily-bundle.mjs',import.meta.url));
   const checked=spawnSync(process.execPath,[verifier,zip],{encoding:'utf8'});
   assert.notEqual(checked.status,0);
   assert.match(checked.stderr,/Daily protection failed/);
@@ -66,8 +68,8 @@ test('compiled daily verifier accepts a game ZIP containing both daily implement
   fs.mkdirSync(path.join(dir,'assets'));
   fs.writeFileSync(path.join(dir,'assets','main.js'), 'function daily(){return "Offline Daily"+"Official Online Daily"+new Date().toISOString().substring(0,10)+"daily/seed"+"zenni.pokevoid.officialDaily.v1"+"Daily Run: enter 1 for Offline Daily or 2 for Official Online Daily"+"Official daily unavailable online and no current-day cached seed exists"}');
   const zip=path.join(dir,'game.zip');
-  assert.equal(spawnSync('zip',['-q',zip,'assets/main.js'],{cwd:dir}).status,0);
-  const verifier=new URL('../scripts/verify-daily-bundle.mjs',import.meta.url).pathname;
+  assert.equal(zipFixture(['-q',zip,'assets/main.js'],{cwd:dir}).status,0);
+  const verifier=fileURLToPath(new URL('../scripts/verify-daily-bundle.mjs',import.meta.url));
   const checked=spawnSync(process.execPath,[verifier,zip],{encoding:'utf8'});
   assert.equal(checked.status,0,checked.stderr);
  } finally {fs.rmSync(dir,{recursive:true,force:true});}
@@ -114,8 +116,8 @@ test('compiled daily verifier rejects bundles with labels but no daily selection
   fs.mkdirSync(path.join(dir,'assets'));
   fs.writeFileSync(path.join(dir,'assets/main.js'), '"Offline Daily"+"Official Online Daily"+"daily/seed"+"zenni.pokevoid.officialDaily.v1"+new Date().toISOString().substring(0,10)');
   const zip=path.join(dir,'game.zip');
-  assert.equal(spawnSync('zip',['-q',zip,'assets/main.js'],{cwd:dir}).status,0);
-  const result=spawnSync(process.execPath,[new URL('../scripts/verify-daily-bundle.mjs',import.meta.url).pathname,zip],{encoding:'utf8'});
+  assert.equal(zipFixture(['-q',zip,'assets/main.js'],{cwd:dir}).status,0);
+  const result=spawnSync(process.execPath,[fileURLToPath(new URL('../scripts/verify-daily-bundle.mjs',import.meta.url)),zip],{encoding:'utf8'});
   assert.notEqual(result.status,0);
   assert.match(result.stderr,/nativeSelection=false/);
  } finally {fs.rmSync(dir,{recursive:true,force:true});}
@@ -127,8 +129,8 @@ test('compiled daily verifier finds Vite JavaScript chunks in nested asset folde
   fs.mkdirSync(path.join(dir,'assets','chunks'),{recursive:true});
   fs.writeFileSync(path.join(dir,'assets','chunks','daily.js'), 'function daily(){return "Offline Daily"+"Official Online Daily"+new Date().toISOString().substring(0,10)+"daily/seed"+"zenni.pokevoid.officialDaily.v1"+"Daily Run: enter 1 for Offline Daily or 2 for Official Online Daily"+"Official daily unavailable online and no current-day cached seed exists"}');
   const zip=path.join(dir,'game.zip');
-  assert.equal(spawnSync('zip',['-q',zip,'assets/chunks/daily.js'],{cwd:dir}).status,0);
-  const checked=spawnSync(process.execPath,[new URL('../scripts/verify-daily-bundle.mjs',import.meta.url).pathname,zip],{encoding:'utf8'});
+  assert.equal(zipFixture(['-q',zip,'assets/chunks/daily.js'],{cwd:dir}).status,0);
+  const checked=spawnSync(process.execPath,[fileURLToPath(new URL('../scripts/verify-daily-bundle.mjs',import.meta.url)),zip],{encoding:'utf8'});
   assert.equal(checked.status,0,checked.stderr);
  } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });

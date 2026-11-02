@@ -7,7 +7,7 @@ if (!feed || !base) throw Error('Both update feed and release base URL are requi
 const expectedFeed = `https://${process.env.GITHUB_REPOSITORY_OWNER}.github.io/${process.env.GITHUB_REPOSITORY.split('/')[1]}/capacitor-update.json`;
 if (feed !== expectedFeed) throw Error(`Update feed must be ${expectedFeed}; GitHub release asset URLs are not suitable as a browser fetch feed`);
 const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
-if (!Array.isArray(manifest.features) || !manifest.features.includes('offline-daily-v1') || !manifest.features.includes('official-daily-cache-v1')) throw Error('Manifest does not declare protected daily features');
+if (!Array.isArray(manifest.features) || !manifest.features.includes('offline-daily-v1') || !manifest.features.includes('official-daily-cache-v1') || !manifest.features.includes('external-game-v1')) throw Error('Manifest does not declare protected daily features');
 const expectedUrl = new URL(`pokevoid-game-${manifest.version}.zip`, base).href;
 if (manifest.url !== expectedUrl) throw Error(`Manifest game ZIP URL mismatch: ${manifest.url}`);
 if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/game-feed\/$/.test(base)) throw Error('Release base must point to the game-feed release in GitHub');

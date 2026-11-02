@@ -1,195 +1,130 @@
 package com.zenni.pokevoid;
 
+import android.os.Build;
 import android.os.Environment;
-import com.getcapacitor.JSObject;
-import com.getcapacitor.Plugin;
-import com.getcapacitor.PluginCall;
-import com.getcapacitor.PluginMethod;
+import android.os.Handler;
+import android.os.Looper;
+import android.webkit.*;
+import com.getcapacitor.*;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.*;
-import java.nio.file.*;
-import java.security.MessageDigest;
-import java.util.Locale;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.concurrent.*;
 
-/**
- * External game installer. Keeps all extracted playable assets under
- * /storage/emulated/0/PokeVoid/Game; never extracts into app-private storage.
- * The active directory is left untouched until a complete verified staging
- * directory is ready. Activation is intentionally separate from extraction.
- */
+/** Uses Capacitor's WebView file host at the stable https://localhost origin. No private asset copy. */
 @CapacitorPlugin(name = "ExternalGame")
 public class ExternalGamePlugin extends Plugin {
-    private File gameRoot() throws IOException {
-        if (!Environment.isExternalStorageManager())
-            throw new IOException("All files access is required for external game installation");
-        File root = new File(Environment.getExternalStorageDirectory(), "PokeVoid/Game");
-        if (!root.isDirectory() && !root.mkdirs()) throw new IOException("Cannot create external game folder");
-        return root;
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private volatile boolean launched;
+    private volatile boolean loadFailed;
+    private volatile boolean waiting;
+    private volatile String launchId = "";
+    private final Runnable timeout = () -> rollback();
+    private ExternalGameStorage storage() throws IOException {
+        if (Build.VERSION.SDK_INT < 30 || !Environment.isExternalStorageManager())
+            throw new IOException("Enable All files access to use PokeVoid/Game");
+        return new ExternalGameStorage(new File(Environment.getExternalStorageDirectory(), "PokeVoid/Game"));
     }
-
-    @PluginMethod
-    public void status(PluginCall call) {
-        try {
-            File root = gameRoot();
-            JSObject result = new JSObject();
-            result.put("path", root.getAbsolutePath());
-            result.put("installed", new File(root, "current/index.html").isFile());
-            call.resolve(result);
-        } catch (Exception error) { call.reject("External game storage unavailable", error); }
+    interface Action { void run() throws Exception; }
+    private void execute(PluginCall call, Action action) {
+        worker.execute(() -> {
+            try { action.run(); } catch (Exception e) { call.reject(e.getMessage(), e); }
+        });
     }
-
-    /** Stage a previously SHA-256 verified archive from the native downloader. */
-    @PluginMethod
-    public void stage(PluginCall call) {
-        String sha = call.getString("checksum");
-        if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) {
-            call.reject("Invalid archive checksum"); return;
-        }
-        String key = sha.toLowerCase(Locale.ROOT);
-        new Thread(() -> {
-            File staging = null;
-            try {
-                File root = gameRoot();
-                File archive = new File(new File(getContext().getFilesDir(), "resumable-bundles"), key + ".zip");
-                if (!archive.isFile() || !matches(archive, key)) throw new IOException("Verified download not available");
-                staging = new File(root, ".staging-" + key);
-                if (staging.exists()) deleteTree(staging);
-                if (!staging.mkdir()) throw new IOException("Cannot create staging directory");
-                String base = staging.getCanonicalPath() + File.separator;
-                long total = 0;
-                int count = 0;
-                try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(new FileInputStream(archive)))) {
-                    ZipEntry entry;
-                    byte[] buffer = new byte[65536];
-                    while ((entry = zip.getNextEntry()) != null) {
-                        if (++count > 200000) throw new IOException("Archive has too many entries");
-                        String name = entry.getName();
-                        if (name.startsWith("/") || name.contains("\\") || name.indexOf('\0') >= 0)
-                            throw new IOException("Unsafe archive entry");
-                        File dest = new File(staging, name);
-                        String canonical = dest.getCanonicalPath();
-                        if (!canonical.startsWith(base)) throw new IOException("Archive path traversal refused");
-                        if (entry.isDirectory()) {
-                            if (!dest.isDirectory() && !dest.mkdirs()) throw new IOException("Cannot create game directory");
-                        } else {
-                            File parent = dest.getParentFile();
-                            if (!parent.isDirectory() && !parent.mkdirs()) throw new IOException("Cannot create asset directory");
-                            try (FileOutputStream out = new FileOutputStream(dest)) {
-                                int n;
-                                while ((n = zip.read(buffer)) != -1) {
-                                    total += n;
-                                    if (total > 4L * 1024 * 1024 * 1024) throw new IOException("Uncompressed game exceeds 4 GiB");
-                                    out.write(buffer, 0, n);
-                                }
-                                out.getFD().sync();
-                            }
-                        }
-                        zip.closeEntry();
-                    }
+    @Override public void load() {
+        ui.post(() -> {
+            getBridge().getWebView().addJavascriptInterface(new DirectSaveBridge(), "PokeVoidSaves");
+            getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+            getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                    super.onReceivedError(view, request, error);
+                    if (launched && request.isForMainFrame()) rollback();
                 }
-                if (!new File(staging, "index.html").isFile()) throw new IOException("Game entrypoint missing");
-                JSObject result = new JSObject();
-                result.put("path", staging.getAbsolutePath());
-                result.put("bytes", total);
-                call.resolve(result);
-            } catch (Exception error) {
-                if (staging != null) deleteTree(staging);
-                call.reject("External game extraction failed", error);
-            }
-        }, "pokevoid-external-install").start();
-    }
-
-    /**
-     * Activate a fully extracted version without copying it to app-private storage.
-     * Keep the prior installation until the new directory is safely in place.
-     * If promotion fails, restore the old installation before reporting failure.
-     */
-    @PluginMethod
-    public void activate(PluginCall call) {
-        String sha = call.getString("checksum");
-        if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) {
-            call.reject("Invalid staged version"); return;
-        }
-        synchronized (this) {
-            try {
-                File root = gameRoot();
-                File staged = new File(root, ".staging-" + sha.toLowerCase(Locale.ROOT));
-                File active = new File(root, "current");
-                File previous = new File(root, ".previous");
-                if (!new File(staged, "index.html").isFile()) throw new IOException("Staged game is incomplete");
-                if (previous.exists()) throw new IOException("Previous installation recovery pending; refusing destructive activation");
-                boolean movedOld = false;
-                if (active.exists()) {
-                    if (!active.renameTo(previous)) throw new IOException("Cannot preserve previous game");
-                    movedOld = true;
+                @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
+                    super.onReceivedHttpError(view, request, response);
+                    if (launched && request.isForMainFrame()) rollback();
                 }
-                if (!staged.renameTo(active)) {
-                    if (movedOld && !previous.renameTo(active))
-                        throw new IOException("Activation failed; previous game remains at " + previous.getAbsolutePath());
-                    throw new IOException("Cannot activate staged game");
-                }
-                // Preserve the previous version until the new version has been
-                // successfully loaded and acknowledged by the WebView.
-                JSObject result = new JSObject();
-                result.put("path", active.getAbsolutePath());
-                result.put("previousRetained", movedOld);
-                call.resolve(result);
-            } catch (Exception error) { call.reject("External game activation failed", error); }
-        }
+            });
+        });
     }
-
-    @PluginMethod
-    public void confirmLaunch(PluginCall call) {
-        synchronized (this) {
-            try {
-                File root = gameRoot();
-                if (!new File(root, "current/index.html").isFile()) throw new IOException("No active game to confirm");
-                File previous = new File(root, ".previous");
-                if (previous.exists()) {
-                    deleteTree(previous);
-                    if (previous.exists()) throw new IOException("Cannot remove obsolete previous game");
-                }
-                call.resolve();
-            } catch (Exception error) { call.reject("Game confirmation cleanup failed", error); }
-        }
+    private JSObject state() throws Exception {
+        ExternalGameStorage s = storage();
+        JSObject result = new JSObject();
+        result.put("installed", s.installed()); result.put("version", s.version());
+        result.put("path", s.current().getAbsolutePath()); result.put("launchId", launchId);
+        result.put("pending", s.pending()); result.put("failedChecksum", s.failedChecksum()); result.put("loadFailed", loadFailed);
+        return result;
     }
-
-    @PluginMethod
-    public void recover(PluginCall call) {
-        synchronized (this) {
-            try {
-                File root = gameRoot();
-                File active = new File(root, "current");
-                File previous = new File(root, ".previous");
-                if (!active.exists() && previous.exists()) {
-                    if (!previous.renameTo(active)) throw new IOException("Cannot restore previous game");
-                }
-                JSObject result = new JSObject();
-                result.put("installed", new File(active, "index.html").isFile());
-                result.put("previousRetained", previous.exists());
-                call.resolve(result);
-            } catch (Exception error) { call.reject("Game recovery failed", error); }
-        }
+    @PluginMethod public void status(PluginCall call) { execute(call, () -> call.resolve(state())); }
+    @PluginMethod public void recover(PluginCall call) {
+        execute(call, () -> {
+            if (launched) throw new IOException("Cannot recover a running game");
+            storage().recover(); DownloadCache.clean(new File(getContext().getFilesDir(), "resumable-bundles"), null);
+            call.resolve(state());
+        });
     }
-
-    private static boolean matches(File file, String sha) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
-            byte[] buffer = new byte[65536];
-            int n;
-            while ((n = in.read(buffer)) != -1) digest.update(buffer, 0, n);
-        }
-        StringBuilder hex = new StringBuilder();
-        for (byte b : digest.digest()) hex.append(String.format(Locale.ROOT, "%02x", b & 255));
-        return sha.equals(hex.toString());
+    @PluginMethod public void stage(PluginCall call) {
+        execute(call, () -> {
+            String sha = call.getString("checksum");
+            if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) throw new IOException("Invalid checksum");
+            File archive = new File(new File(getContext().getFilesDir(), "resumable-bundles"), sha.toLowerCase(java.util.Locale.ROOT) + ".zip");
+            storage().stage(archive, sha, call.getString("version")); call.resolve();
+        });
     }
-
-    private static void deleteTree(File root) {
-        if (!root.exists()) return;
-        File[] children = root.listFiles();
-        if (children != null) for (File child : children) deleteTree(child);
-        root.delete();
+    @PluginMethod public void activate(PluginCall call) {
+        execute(call, () -> {
+            storage().activate(call.getString("checksum")); call.resolve();
+        });
     }
+    @PluginMethod public void open(PluginCall call) {
+        execute(call, () -> {
+            ExternalGameStorage s = storage();
+            if (!s.installed()) throw new IOException("No external game installed");
+            String base = s.current().getCanonicalPath();
+            waiting = s.pending();
+            launchId = java.util.UUID.randomUUID().toString();
+            ui.post(() -> {
+                getBridge().getWebView().stopLoading();
+                getBridge().getWebView().clearCache(true);
+                launched = true; loadFailed = false;
+                getBridge().setServerBasePath(base);
+                if (waiting) ui.postDelayed(timeout, 180000);
+            });
+            call.resolve();
+        });
+    }
+    @PluginMethod public void confirmLaunch(PluginCall call) {
+        execute(call, () -> {
+            if (!launched || !launchId.equals(call.getString("launchId"))) throw new IOException("Stale launch confirmation");
+            storage().confirm(); waiting = false; ui.removeCallbacks(timeout);
+            DownloadCache.clean(new File(getContext().getFilesDir(), "resumable-bundles"), "");
+            cleanLegacyAssets();
+            call.resolve();
+        });
+    }
+    private void cleanLegacyAssets() throws IOException {
+        // Exact directories owned by the retired updater; never WebView data or saves.
+        ExternalGameStorage.removeTree(new File(getContext().getFilesDir(), "versions"));
+        ExternalGameStorage.removeTree(new File(getContext().getCacheDir(), "capgo_downloads"));
+        File root = storage().current().getParentFile();
+        File[] leftovers = root.listFiles((dir, name) -> name.matches("(\\.staging-[a-f0-9]{64}|pokevoid-[a-f0-9]{64}\\.zip)"));
+        if (leftovers != null) for (File item : leftovers) ExternalGameStorage.removeTree(item);
+        File releases = new File(root, "releases");
+        File[] versions = releases.listFiles((dir, name) -> name.matches("[a-f0-9]{64}"));
+        if (versions != null) for (File item : versions) ExternalGameStorage.removeTree(item);
+    }
+    private void rollback() {
+        if (!launched) return;
+        launched = false; loadFailed = true; waiting = false; ui.removeCallbacks(timeout);
+        ui.post(() -> {
+            getBridge().getWebView().stopLoading();
+            worker.execute(() -> {
+                try { storage().recover(); } catch (Exception e) { android.util.Log.e("PokeVoid", "Recovery failed", e); }
+                ui.post(() -> { getBridge().getWebView().clearCache(true); getBridge().setServerAssetPath("public"); });
+            });
+        });
+    }
+    @Override protected void handleOnPause() { ui.removeCallbacks(timeout); }
+    @Override protected void handleOnResume() { if (waiting) ui.postDelayed(timeout, 180000); }
+    @Override protected void handleOnDestroy() { ui.removeCallbacks(timeout); worker.shutdown(); }
 }

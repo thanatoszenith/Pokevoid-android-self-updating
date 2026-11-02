@@ -1,10 +1,10 @@
 import { registerPlugin } from '@capacitor/core';
-
-/** Native external installation; never points at CapacitorUpdater's private bundles. */
+export type ExternalState = { path: string; installed: boolean; version: string; pending: boolean; launchId: string; failedChecksum: string; loadFailed: boolean };
 export const ExternalGame = registerPlugin<{
-  status(): Promise<{ path: string; installed: boolean }>;
-  stage(options: { checksum: string }): Promise<{ path: string; bytes: number }>;
-  activate(options: { checksum: string }): Promise<{ path: string; previousRetained: boolean }>;
-  confirmLaunch(): Promise<void>;
-  recover(): Promise<{ installed: boolean; previousRetained: boolean }>;
+  status(): Promise<ExternalState>;
+  recover(): Promise<ExternalState>;
+  stage(options: { checksum: string; version: string }): Promise<void>;
+  activate(options: { checksum: string }): Promise<void>;
+  open(): Promise<void>;
+  confirmLaunch(options: { launchId: string }): Promise<void>;
 }>('ExternalGame');

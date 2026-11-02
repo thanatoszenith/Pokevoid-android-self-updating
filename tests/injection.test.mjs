@@ -1,10 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-const script = new URL('../scripts/inject-feed.mjs', import.meta.url).pathname;
+const script = fileURLToPath(new URL('../scripts/inject-feed.mjs', import.meta.url));
 function run(feed) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'feed-test-'));
  const file=path.join(dir,'main.ts');

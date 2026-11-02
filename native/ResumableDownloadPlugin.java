@@ -9,25 +9,17 @@ import java.io.*;
 import android.content.Intent;
 import androidx.core.content.ContextCompat;
 import java.net.*;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @CapacitorPlugin(name = "ResumableDownload")
 public class ResumableDownloadPlugin extends Plugin {
     private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final ExecutorService clients = new ThreadPoolExecutor(2, 4, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(8));
     private final AtomicInteger activeDownloads = new AtomicInteger();
-    private volatile ServerSocket server;
-    private volatile String serverToken;
-    private volatile String servedChecksum;
 
     @PluginMethod
     public void download(PluginCall call) {
@@ -49,6 +41,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 File dir = new File(getContext().getFilesDir(), "resumable-bundles");
                 if (!dir.exists() && !dir.mkdirs()) throw new IOException("Cannot create download directory");
                 String key = sha.toLowerCase(Locale.ROOT);
+                DownloadCache.clean(dir, key);
                 File partial = new File(dir, key + ".part"), complete = new File(dir, key + ".zip");
                 boolean verifiedComplete = complete.exists() && matches(complete, key);
                 if (verifiedComplete) sendProgress(complete.length(), complete.length());
@@ -65,7 +58,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 // installer will extract verified assets directly into PokeVoid/Game.
                 JSObject result = new JSObject();
                 result.put("bytes", complete.length());
-                result.put("url", startLocalServer(complete, key));
+                result.put("checksum", key);
                 call.resolve(result);
             } catch (Exception error) { call.reject("Resumable download failed", error); }
             finally {
@@ -88,11 +81,6 @@ public class ResumableDownloadPlugin extends Plugin {
             try {
                 File dir = new File(getContext().getFilesDir(), "resumable-bundles");
                 File archive = new File(dir, sha.toLowerCase(Locale.ROOT) + ".zip");
-                synchronized (this) {
-                    if (server != null && sha.equalsIgnoreCase(servedChecksum)) {
-                        server.close(); server = null; serverToken = null; servedChecksum = null;
-                    }
-                }
                 if (archive.exists() && !archive.delete()) throw new IOException("Could not remove imported archive");
                 File partial = new File(dir, sha.toLowerCase(Locale.ROOT) + ".part");
                 if (partial.exists() && !partial.delete()) throw new IOException("Could not remove obsolete partial archive");
@@ -197,6 +185,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     byte[] buf = new byte[65536];
                     int n;
                     while ((n = input.read(buf)) != -1) {
+                        if ((long)n > DownloadCache.MAX_BYTES - done) throw new IOException("Archive exceeds download limit");
                         if (total >= 0 && (long)n > total - done) throw new IOException("Response exceeded advertised size");
                         if (responseEnd >= 0 && (long)n > responseEnd + 1 - done) throw new IOException("Response exceeded declared Content-Range");
                         output.write(buf, 0, n);
@@ -258,79 +247,6 @@ public class ResumableDownloadPlugin extends Plugin {
         return hex.toString().equals(checksum);
     }
 
-    private synchronized String startLocalServer(File file, String checksum) throws IOException {
-        if (server != null && !server.isClosed()) server.close();
-        server = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
-        servedChecksum = checksum;
-        serverToken = java.util.UUID.randomUUID().toString();
-        String token = serverToken;
-        ServerSocket socket = server;
-        Thread thread = new Thread(() -> {
-            while (!socket.isClosed()) {
-                try {
-                    Socket client = socket.accept();
-                    executorForClient(client, file, token);
-                } catch (IOException e) { break; }
-            }
-        }, "pokevoid-archive-server");
-        thread.setDaemon(true); thread.start();
-        return "http://127.0.0.1:" + socket.getLocalPort() + "/" + token + "/bundle.zip";
-    }
 
-    /** Limit each HTTP line before allocating an unbounded String. */
-    private String readLimitedLine(BufferedReader reader) throws IOException {
-        StringBuilder line = new StringBuilder();
-        for (int i = 0; i <= 8192; i++) {
-            int c = reader.read();
-            if (c == -1) return line.length() == 0 ? null : line.toString();
-            if (c == '\n') return line.toString();
-            if (c != '\r') line.append((char) c);
-        }
-        throw new IOException("HTTP request line exceeds limit");
-    }
-
-    private void executorForClient(Socket client, File file, String token) {
-        try {
-            clients.execute(() -> {
-            try (Socket s = client; BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII))) {
-                s.setSoTimeout(30000);
-                String request = readLimitedLine(reader);
-                if (request == null || request.length() > 8192 || !(request.equals("GET /" + token + "/bundle.zip HTTP/1.1") || request.equals("HEAD /" + token + "/bundle.zip HTTP/1.1"))) return;
-                String line, range = null;
-                int headerCount = 0;
-                while ((line = readLimitedLine(reader)) != null && !line.isEmpty()) {
-                    if (++headerCount > 64 || line.length() > 8192) return;
-                    if (line.toLowerCase(Locale.ROOT).startsWith("range:")) range = line.substring(6).trim();
-                }
-                long start = 0, end = file.length() - 1;
-                if (range != null && range.matches("bytes=\\d+-\\d*")) {
-                    try {
-                        String[] pieces = range.substring(6).split("-", 2);
-                        start = Long.parseLong(pieces[0]);
-                        if (pieces.length > 1 && !pieces[1].isEmpty()) end = Math.min(end, Long.parseLong(pieces[1]));
-                    } catch (NumberFormatException invalidRange) { start = file.length(); }
-                }
-                if (range != null && !range.matches("bytes=\\d+-\\d*")) return;
-                if (start > end || start >= file.length() || file.length() == 0) {
-                    OutputStream out = s.getOutputStream();
-                    out.write(("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */" + file.length() + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-                    out.flush(); return;
-                }
-                boolean partial = start > 0 || end < file.length() - 1;
-                OutputStream out = s.getOutputStream();
-                String headers = "HTTP/1.1 " + (partial ? "206 Partial Content" : "200 OK") + "\r\nContent-Type: application/zip\r\nAccept-Ranges: bytes\r\nContent-Length: " + (end-start+1) + "\r\n" + (partial ? "Content-Range: bytes " + start + "-" + end + "/" + file.length() + "\r\n" : "") + "Connection: close\r\n\r\n";
-                out.write(headers.getBytes(StandardCharsets.US_ASCII));
-                if (!request.startsWith("HEAD")) {
-                    try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
-                        input.seek(start); byte[] b = new byte[65536]; long left = end-start+1;
-                        while (left > 0) { int n = input.read(b, 0, (int)Math.min(left,b.length)); if(n < 0) break; out.write(b,0,n); left-=n; }
-                    }
-                }
-                out.flush();
-            } catch (Exception ignored) {}
-            });
-        } catch (RejectedExecutionException busy) {
-            try { client.close(); } catch (IOException ignored) {}
-        }
-    }
+    @Override protected void handleOnDestroy() { executor.shutdown(); }
 }

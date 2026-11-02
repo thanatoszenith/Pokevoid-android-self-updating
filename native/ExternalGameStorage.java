@@ -1,89 +1,138 @@
 package com.zenni.pokevoid;
 
-import android.os.Environment;
-import android.os.Build;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.MessageDigest;
-import java.util.Locale;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.*;
+import java.util.zip.*;
 
-/** Atomic, versioned external game extraction. No WebView activation until separately verified. */
+/** Recoverable filesystem transaction; deliberately independent of Android for JVM tests. */
 public final class ExternalGameStorage {
-    private ExternalGameStorage() {}
-    public static File root() { return new File(Environment.getExternalStorageDirectory(), "PokeVoid/Game"); }
-    public static boolean permitted() {
-        return Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();
+    private final File root;
+    public ExternalGameStorage(File root) { this.root = root; }
+    private File file(String name) { return new File(root, name); }
+    public File current() { return file("current"); }
+    public boolean installed() { return new File(current(), "index.html").isFile(); }
+    public boolean pending() { return file(".pending").exists(); }
+    public String failedChecksum() throws IOException {
+        return file(".failed").isFile() ? new String(Files.readAllBytes(file(".failed").toPath()), StandardCharsets.UTF_8) : "";
     }
-    private static File releases() { return new File(root(), "releases"); }
-    public static File release(String checksum) {
-        if (checksum == null || !checksum.matches("[a-fA-F0-9]{64}")) throw new IllegalArgumentException("Invalid checksum");
-        return new File(releases(), checksum.toLowerCase(Locale.ROOT));
+    public String version() throws IOException {
+        File meta = new File(current(), ".version");
+        return meta.isFile() ? new String(Files.readAllBytes(meta.toPath()), StandardCharsets.UTF_8) : "0";
     }
-    private static void copy(InputStream in, OutputStream out) throws IOException {
-        byte[] buf = new byte[65536]; int n;
-        while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+    private void ensureRoot() throws IOException {
+        if (!root.isDirectory() && !root.mkdirs()) throw new IOException("Cannot create external game directory");
     }
-    private static boolean sameHash(File archive, String expected) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    private static void write(File target, String value) throws IOException {
+        try (FileOutputStream out = new FileOutputStream(target)) {
+            out.write(value.getBytes(StandardCharsets.UTF_8)); out.getFD().sync();
+        }
+    }
+    public static boolean matches(File archive, String expected) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
         try (InputStream in = new FileInputStream(archive)) {
             byte[] b = new byte[65536]; int n;
-            while ((n = in.read(b)) != -1) digest.update(b, 0, n);
+            while ((n = in.read(b)) != -1) md.update(b, 0, n);
         }
-        StringBuilder result = new StringBuilder();
-        for (byte b : digest.digest()) result.append(String.format(Locale.ROOT, "%02x", b & 255));
-        return result.toString().equalsIgnoreCase(expected);
+        StringBuilder hex = new StringBuilder();
+        for (byte b : md.digest()) hex.append(String.format(Locale.ROOT, "%02x", b & 255));
+        return hex.toString().equalsIgnoreCase(expected);
     }
-    public static synchronized File install(File archive, String checksum) throws Exception {
-        if (!permitted()) throw new IOException("All files access is required for external game installation");
-        if (!sameHash(archive, checksum)) throw new IOException("Game archive SHA-256 mismatch");
-        File dest = release(checksum);
-        if (new File(dest, "index.html").isFile()) return dest;\n        if (dest.exists()) throw new IOException("Existing incomplete release requires explicit recovery");
-        if (!releases().isDirectory() && !releases().mkdirs()) throw new IOException("Cannot create game releases directory");
-        File staging = new File(releases(), "." + checksum.toLowerCase(Locale.ROOT) + ".installing");
-        if (staging.exists()) removeTree(staging);
-        if (!staging.mkdirs()) throw new IOException("Cannot create staging directory");
+    public synchronized void stage(File archive, String sha, String version) throws Exception {
+        if (sha == null || !sha.matches("[a-fA-F0-9]{64}") || version == null || !version.matches("[0-9]+(\\.[0-9]+)*"))
+            throw new IOException("Invalid game metadata");
+        ensureRoot();
+        if (pending()) throw new IOException("Launch confirmation pending");
+        if (!matches(archive, sha)) throw new IOException("Game archive SHA-256 mismatch");
+        File staging = file(".staging");
+        removeTree(staging);
+        if (!staging.mkdir()) throw new IOException("Cannot create staging directory");
         try {
-            int count = 0;
-            long total = 0;
+            Set<String> names = new HashSet<>(); long total = 0; int count = 0;
             String base = staging.getCanonicalPath() + File.separator;
             try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(new FileInputStream(archive)))) {
-                ZipEntry entry;
+                ZipEntry entry; byte[] buffer = new byte[65536];
                 while ((entry = zip.getNextEntry()) != null) {
-                    if (++count > 30000) throw new IOException("Too many game archive entries");
                     String name = entry.getName();
-                    if (name.startsWith("/") || name.indexOf('\\') >= 0) throw new IOException("Unsafe ZIP path");
-                    File output = new File(staging, name);
-                    String canonical = output.getCanonicalPath();
-                    if (!canonical.startsWith(base)) throw new IOException("ZIP path traversal blocked");
+                    if (++count > 200000 || name.startsWith("/") || name.contains("\\") || name.indexOf('\0') >= 0
+                        || Arrays.asList(name.split("/", -1)).contains("..")) throw new IOException("Unsafe ZIP entry");
+                    File dest = new File(staging, name);
+                    String canonical = dest.getCanonicalPath();
+                    if (!canonical.startsWith(base) || !names.add(canonical)) throw new IOException("Unsafe or duplicate ZIP path");
                     if (entry.isDirectory()) {
-                        if (!output.isDirectory() && !output.mkdirs()) throw new IOException("Cannot create ZIP directory");
+                        if (!dest.isDirectory() && !dest.mkdirs()) throw new IOException("Cannot create ZIP directory");
                     } else {
-                        File parent = output.getParentFile();
-                        if (!parent.isDirectory() && !parent.mkdirs()) throw new IOException("Cannot create ZIP parent");
-                        try (FileOutputStream file = new FileOutputStream(output)) {
-                            byte[] b = new byte[65536]; int n;
-                            while ((n = zip.read(b)) != -1) {
+                        if (!dest.getParentFile().isDirectory() && !dest.getParentFile().mkdirs()) throw new IOException("Cannot create ZIP parent");
+                        try (FileOutputStream out = new FileOutputStream(dest)) {
+                            int n;
+                            while ((n = zip.read(buffer)) != -1) {
                                 total += n;
-                                if (total > 4L * 1024 * 1024 * 1024) throw new IOException("Game extraction exceeds 4 GiB");
-                                file.write(b, 0, n);
+                                if (total > 4L * 1024 * 1024 * 1024) throw new IOException("Game exceeds 4 GiB");
+                                out.write(buffer, 0, n);
                             }
-                            file.getFD().sync();
+                            out.getFD().sync();
                         }
                     }
                     zip.closeEntry();
                 }
             }
-            if (!new File(staging, "index.html").isFile()) throw new IOException("Extracted game missing index.html");
-            if (dest.exists()) removeTree(dest);
-            if (!staging.renameTo(dest)) throw new IOException("Cannot publish verified game directory");
-            return dest;
-        } finally { if (staging.exists()) removeTree(staging); }
+            if (!new File(staging, "index.html").isFile()) throw new IOException("Game entrypoint missing");
+            write(new File(staging, ".version"), version);
+            write(new File(staging, ".checksum"), sha.toLowerCase(Locale.ROOT));
+        } catch (Exception e) { removeTree(staging); throw e; }
     }
-    private static void removeTree(File file) throws IOException {
-        File[] children = file.listFiles();
-        if (children != null) for (File child : children) removeTree(child);
-        if (!file.delete()) throw new IOException("Cannot remove " + file.getName());
+    public synchronized void activate(String sha) throws IOException {
+        File staged = file(".staging"), previous = file(".previous");
+        File checksum = new File(staged, ".checksum");
+        if (!new File(staged, "index.html").isFile() || !checksum.isFile()
+            || !new String(Files.readAllBytes(checksum.toPath()), StandardCharsets.UTF_8).equalsIgnoreCase(sha))
+            throw new IOException("Staged game does not match requested update");
+        if (pending() || previous.exists() || file(".confirmed").exists()) throw new IOException("Recovery pending");
+        write(file(".pending"), current().exists() ? "old" : "new");
+        try {
+            if (current().exists() && !current().renameTo(previous)) throw new IOException("Cannot preserve current game");
+            if (!staged.renameTo(current())) throw new IOException("Cannot promote staged game");
+        } catch (IOException e) { recover(); throw e; }
+    }
+    public synchronized void confirm() throws IOException {
+        if (!installed()) throw new IOException("No active game");
+        if (pending() && !file(".pending").renameTo(file(".confirmed"))) throw new IOException("Cannot commit launch");
+        // A crash during cleanup must never roll back a confirmed game.
+        removeTree(file(".previous")); removeTree(file(".confirmed"));
+    }
+    public synchronized void recover() throws IOException {
+        ensureRoot();
+        File previous = file(".previous");
+        if (file(".confirmed").exists()) { removeTree(previous); removeTree(file(".confirmed")); }
+        else {
+            if (pending()) {
+                File checksum = new File(current(), ".checksum");
+                if (!file(".staging").exists() && checksum.isFile())
+                    write(file(".failed"), new String(Files.readAllBytes(checksum.toPath()), StandardCharsets.UTF_8));
+                if (!file(".pending").renameTo(file(".rollback"))) throw new IOException("Cannot journal rollback");
+            }
+            if (file(".rollback").exists()) {
+                String kind = new String(Files.readAllBytes(file(".rollback").toPath()), StandardCharsets.UTF_8);
+                if (previous.exists()) {
+                    removeTree(current());
+                    if (!previous.renameTo(current())) throw new IOException("Cannot restore previous game");
+                } else if (kind.equals("new")) removeTree(current());
+                removeTree(file(".rollback"));
+            } else if (!current().exists() && previous.exists()) {
+                if (!previous.renameTo(current())) throw new IOException("Cannot restore previous game");
+            }
+        }
+        removeTree(file(".staging"));
+    }
+    public static void removeTree(File target) throws IOException {
+        if (!target.exists() && !Files.isSymbolicLink(target.toPath())) return;
+        if (!Files.isSymbolicLink(target.toPath())) {
+            File[] children = target.listFiles();
+            if (target.isDirectory() && children == null) throw new IOException("Cannot list " + target);
+            if (children != null) for (File child : children) removeTree(child);
+        }
+        if (!target.delete()) throw new IOException("Cannot remove " + target);
     }
 }

@@ -1,18 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-const source = fs.readFileSync(new URL('../native/ExternalGameStorage.java', import.meta.url), 'utf8');
-test('external game releases live in shared PokeVoid/Game', () => {
-  assert.match(source, /"PokeVoid\/Game"/);
-  assert.match(source, /new File\(root\(\), "releases"\)/);
-});
-test('external extraction verifies archive and rejects traversal', () => {
-  assert.match(source, /sameHash\(archive, checksum\)/);
-  assert.match(source, /getCanonicalPath\(\)/);
-  assert.match(source, /ZIP path traversal blocked/);
-  assert.match(source, /staging\.renameTo\(dest\)/);
-});
-test('existing external game release is not deleted by the installer', () => {
-  assert.match(source, /Existing incomplete release requires explicit recovery/);
-  assert.doesNotMatch(source, /removeTree\(dest\)/);
+import os from 'node:os';
+import path from 'node:path';
+test('real JVM installer: hashes, ZIP safety, crash recovery, confirmation and bounded caches', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pokevoid-jvm-'));
+  try {
+    const compile = spawnSync(process.env.JAVAC || 'javac', ['-d', dir, 'native/ExternalGameStorage.java', 'native/DownloadCache.java', 'tests/java/ExternalGameStorageTest.java'], {encoding:'utf8'});
+    assert.equal(compile.status, 0, compile.error?.message || compile.stderr);
+    const run = spawnSync(process.env.JAVA || 'java', ['-cp', dir, 'com.zenni.pokevoid.ExternalGameStorageTest'], {encoding:'utf8'});
+    assert.equal(run.status, 0, run.stderr);
+  } finally { fs.rmSync(dir, {recursive:true, force:true}); }
 });

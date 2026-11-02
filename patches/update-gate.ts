@@ -2,7 +2,7 @@ import { ResumableDownload } from './resumable-download';
 import { configureSharedStorage } from './shared-storage';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
-import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { ExternalGame } from './external-game';
 
 const FEED = '__POKEVOID_UPDATE_FEED__';
 const BUNDLED_VERSION = '__POKEVOID_VERSION__';
@@ -35,12 +35,7 @@ function trustedGameAsset(feedUrl: string, assetUrl: string, version: string): b
 }
 
 async function installedVersion(): Promise<string> {
-  try {
-    const state = await CapacitorUpdater.current();
-    const version = state.bundle?.version;
-    if (version && compareVersions(version, version) === 0) return version;
-  } catch (error) { console.warn('[UpdateGate] Cannot read active bundle version', error); }
-  return BUNDLED_VERSION;
+  return (await ExternalGame.status()).version;
 }
 
 async function checkRelease(): Promise<Release | null> {
@@ -51,8 +46,9 @@ async function checkRelease(): Promise<Release | null> {
     if (typeof r.version !== 'string' || typeof r.url !== 'string' || typeof r.checksum !== 'string') return null;
     if (!/^[a-fA-F0-9]{64}$/.test(r.checksum)) return null;
     // Fail closed: never activate an update without the offline daily contract.
-    if (!Array.isArray(r.features) || !r.features.includes('offline-daily-v1') || !r.features.includes('official-daily-cache-v1')) return null;
+    if (!Array.isArray(r.features) || !r.features.includes('offline-daily-v1') || !r.features.includes('official-daily-cache-v1') || !r.features.includes('external-game-v1')) return null;
     if (!trustedGameAsset(FEED, r.url, r.version)) return null;
+    if ((await ExternalGame.status()).failedChecksum === r.checksum.toLowerCase()) return null;
     return compareVersions(r.version, await installedVersion()) === 1 ? r as Release : null;
   } catch (error) { console.warn('[UpdateGate] Offline or update check failed', error); return null; }
 }
@@ -65,57 +61,11 @@ function showOverlay(): { message: (s: string) => void; remove: () => void } {
   return { message: (s) => { el.textContent = s; }, remove: () => el.remove() };
 }
 
-/** Manually remove only inactive updater bundles. Never touch game saves or the active bundle. */
-async function cleanUnusedBundles(): Promise<void> {
-  const current = await CapacitorUpdater.current();
-  const activeId = current.bundle?.id;
-  if (!activeId || activeId === 'builtin') throw new Error('Active game bundle could not be verified');
-  const result = await CapacitorUpdater.list();
-  // Keep any bundle marked for activation or currently being downloaded; cleanup is conservative.
-  const unused = result.bundles.filter(b => b.id && b.id !== activeId && b.id !== 'builtin' && b.status === 'success');
-  if (!unused.length) { window.alert('No unused game bundles found.'); return; }
-  if (!window.confirm(`Delete ${unused.length} unused game bundle(s)? The active game and saves will be kept.`)) return;
-  let removed = 0;
-  for (const bundle of unused) {
-    try {
-      const latest = await CapacitorUpdater.current();
-      if (latest.bundle?.id !== activeId) throw new Error('Active bundle changed during cleanup');
-      await CapacitorUpdater.delete({ id: bundle.id }); removed++;
-    }
-    catch (error) { console.warn('[UpdateGate] Failed to delete inactive bundle', bundle.id, error); }
-  }
-  window.alert(`Removed ${removed} of ${unused.length} unused game bundles. Saves were not touched.`);
-}
-function installStorageControl(): void {
-  if (!document.getElementById('pokevoid-shared-storage')) {
-    const storage = document.createElement('button');
-    storage.id = 'pokevoid-shared-storage';
-    storage.textContent = 'PokeVoid folder access';
-    Object.assign(storage.style, { position: 'fixed', right: '8px', bottom: '48px', zIndex: '2147483646', padding: '8px', font: '12px system-ui' });
-    storage.addEventListener('click', () => { void configureSharedStorage().catch(error => { console.warn(error); window.alert('Storage access unavailable. Existing saves were not changed.'); }); });
-    document.body.append(storage);
-  }
-  if (document.getElementById('pokevoid-storage-cleanup')) return;
-  const button = document.createElement('button');
-  button.id = 'pokevoid-storage-cleanup';
-  button.textContent = 'Clean unused bundles';
-  button.title = 'Delete old inactive game versions without deleting saves';
-  Object.assign(button.style, { position: 'fixed', right: '8px', bottom: '8px', zIndex: '2147483646', padding: '8px', font: '12px system-ui', opacity: '0.8' });
-  button.addEventListener('click', () => { void cleanUnusedBundles().catch(error => { console.error(error); window.alert('Cleanup unavailable: unable to verify installed bundles. No files were deleted.'); }); });
-  document.body.append(button);
-}
-
-/** Recover a fully downloaded, verified bundle after an app restart without downloading it twice. */
-async function findReadyBundle(version: string, checksum: string) {
-  const { bundles } = await CapacitorUpdater.list();
-  return bundles.find(bundle => bundle.version === version && bundle.status === 'success' && (!(bundle as typeof bundle & { checksum?: string }).checksum || (bundle as typeof bundle & { checksum?: string }).checksum?.toLowerCase() === checksum.toLowerCase()));
-}
 /** Returns false when activation has started and Phaser must NOT boot in this document. */
 export async function updateBeforeGame(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true;
-  installStorageControl();
-  // Capgo needs a readiness acknowledgement on every launch, including offline launches.
-  try { await CapacitorUpdater.notifyAppReady(); } catch (error) { console.warn('[UpdateGate] notifyAppReady failed', error); }
+
+  if ((await ExternalGame.status()).pending) return true;
   const release = await checkRelease();
   if (!release) return true;
   let resume = false;
@@ -156,24 +106,17 @@ export async function updateBeforeGame(): Promise<boolean> {
         overlay.message(`Downloading update: ${mb(downloaded)} received • Total unknown • ${speed > 1024 ? mb(speed) + '/s' : 'Speed calculating…'}`);
       }
     };
-    const ready = await findReadyBundle(release.version, release.checksum).catch(error => { console.warn('[UpdateGate] Recovery lookup unavailable', error); return undefined; });
-    if (ready) {
-      overlay.message('Activating previously downloaded update…');
-      await CapacitorUpdater.set(ready);
-      localStorage.removeItem(RESUME_KEY);
-      return false;
-    }
     const listener = await ResumableDownload.addListener('progress', ({ downloaded, total }) => report(downloaded, total));
-    let bundle;
     try {
-      const archive = await ResumableDownload.download({ url: release.url, checksum: release.checksum });
-      overlay.message('Importing verified update…');
-      bundle = await CapacitorUpdater.download({ url: archive.url, version: release.version, checksum: release.checksum });
+      await ResumableDownload.download({ url: release.url, checksum: release.checksum });
+      overlay.message('Extracting update to PokeVoid/Game…');
+      await ExternalGame.stage({ version: release.version, checksum: release.checksum });
       await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
     } finally { await listener.remove().catch(error => console.warn('[UpdateGate] Progress listener cleanup failed', error)); }
     overlay.message('Installing update…');
-    await CapacitorUpdater.set(bundle);
-    localStorage.removeItem(RESUME_KEY); // Capgo switches/reloads the web bundle.
+    await ExternalGame.activate({ checksum: release.checksum });
+    await ExternalGame.open();
+    localStorage.removeItem(RESUME_KEY); // External file host reloads the WebView.
     // Never boot the old document while a bundle switch is underway.
     return false;
   } catch (error) {

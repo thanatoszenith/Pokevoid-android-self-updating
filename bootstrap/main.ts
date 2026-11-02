@@ -1,8 +1,10 @@
+import { clearNativeAssetCaches } from './native-cache';
 import { ResumableDownload } from './resumable-download';
 import { configureSharedStorage } from './shared-storage';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
-import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { ExternalGame } from './external-game';
+import { SharedStorage } from './shared-storage';
 
 const feed = '__POKEVOID_UPDATE_FEED__';
 const RESUME_KEY = 'pokevoid_pending_bootstrap_download';
@@ -93,7 +95,7 @@ const valid = (v: unknown): v is Release => {
   if (typeof x.version !== 'string' || !/^\d+(\.\d+)*$/.test(x.version) || x.version.split('.').some(n => !Number.isSafeInteger(Number(n)))) return false;
   if (typeof x.checksum !== 'string' || !/^[a-fA-F0-9]{64}$/.test(x.checksum)) return false;
   if (typeof x.url !== 'string') return false;
-  if (!Array.isArray(x.features) || !x.features.includes('offline-daily-v1') || !x.features.includes('official-daily-cache-v1')) return false;
+  if (!Array.isArray(x.features) || !x.features.includes('offline-daily-v1') || !x.features.includes('official-daily-cache-v1') || !x.features.includes('external-game-v1')) return false;
   return trustedGameAsset(feed, x.url, x.version);
 };
 function retry(label: string, action: () => Promise<void>) {
@@ -106,46 +108,29 @@ async function release(): Promise<Release> {
   if (!valid(result)) throw new Error('Invalid game release metadata');
   return result;
 }
-/** The native updater loads the active bundle before this bootstrap page runs.
- * If bootstrap is displayed despite an active bundle, repeatedly calling set()
- * can cause a reload loop. Offer one explicit recovery action instead.
- */
 async function restoreInstalledGame(): Promise<boolean> {
-  try {
-    const state = await CapacitorUpdater.current();
-    const bundle = state.bundle;
-    if (!bundle || !bundle.id || bundle.id === 'builtin') return false;
-    status.textContent = `PokéVoid ${bundle.version || ''} is installed but did not open. You can try reopening it without internet.`;
-    retry('Reopen installed game', async () => {
-      button.disabled = true;
-      status.textContent = 'Reopening installed game…';
-      try {
-        await CapacitorUpdater.set(bundle);
-        status.textContent = 'Reopen requested. If this screen remains, restart the app.';
-        retry('Try again', async () => { await restoreInstalledGame(); });
-      } catch (error) {
-        console.error('Reopen failed', error);
-        status.textContent = 'Unable to reopen installed game. Your saves have not been erased.';
-        retry('Try again', async () => { await restoreInstalledGame(); });
-      }
-    });
-    return true;
-  } catch (error) {
-    console.warn('Installed bundle lookup failed', error);
-    status.textContent = 'Cannot verify installed game. Restart the app or retry; existing saves have not been changed.';
-    retry('Retry installed game check', main);
-    return true;
+  const state = await ExternalGame.recover();
+  if (!state.installed) return false;
+  if (state.loadFailed) {
+    status.textContent = 'The installed game did not finish loading. Your saves are preserved.';
+    retry('Reopen installed game', () => ExternalGame.open());
+  } else {
+    status.textContent = 'Opening external game…';
+    await ExternalGame.open();
   }
-}
-/** Recover a fully downloaded, verified bundle after an app restart without downloading it twice. */
-async function findReadyBundle(version: string, checksum: string) {
-  const { bundles } = await CapacitorUpdater.list();
-  return bundles.find(bundle => bundle.version === version && bundle.status === 'success' && (!(bundle as typeof bundle & { checksum?: string }).checksum || (bundle as typeof bundle & { checksum?: string }).checksum?.toLowerCase() === checksum.toLowerCase()));
+  return true;
 }
 async function main() {
   button.disabled = true;
   if (!Capacitor.isNativePlatform()) { status.textContent = 'Install this Android application to download the game.'; return; }
-  try { await CapacitorUpdater.notifyAppReady(); } catch (error) { console.warn('Readiness failed', error); }
+  const access = await SharedStorage.status();
+  if (!access.granted) {
+    status.textContent = 'Enable PokeVoid folder access below, then return to install or play.';
+    retry('Check folder access', main);
+    return;
+  }
+  await SharedStorage.createFolders();
+  await clearNativeAssetCaches();
   if (await restoreInstalledGame()) {
     localStorage.removeItem(RESUME_KEY);
     return;
@@ -163,28 +148,21 @@ async function main() {
       localStorage.setItem(RESUME_KEY, JSON.stringify({ version: latest.version, checksum: latest.checksum }));
       status.textContent = 'Downloading game… Keep this app open.';
       resetProgress();
-      const ready = await findReadyBundle(latest.version, latest.checksum).catch(error => { console.warn('Bundle recovery lookup failed', error); return undefined; });
-      if (ready) {
-        status.textContent = 'Restoring previously downloaded game…';
-        await CapacitorUpdater.set(ready);
-        localStorage.removeItem(RESUME_KEY);
-        return;
-      }
       const progressListener = await ResumableDownload.addListener('progress', event => {
         showProgress(event.downloaded, event.total);
       });
-      let bundle;
       try {
-        const archive = await ResumableDownload.download({ url: latest.url, checksum: latest.checksum });
-        status.textContent = 'Importing verified game bundle…';
-        bundle = await CapacitorUpdater.download({url: archive.url, version:latest.version, checksum:latest.checksum});
+        await ResumableDownload.download({ url: latest.url, checksum: latest.checksum });
+        status.textContent = 'Extracting game to PokeVoid/Game…';
+        await ExternalGame.stage({ version: latest.version, checksum: latest.checksum });
         await ResumableDownload.releaseArchive({ checksum: latest.checksum }).catch(error => console.warn('Archive cleanup deferred', error));
       } finally {
         await progressListener.remove().catch(error => console.warn('Progress listener cleanup failed', error));
       }
       if (lastTotal > 0) showProgress(lastTotal, lastTotal);
       status.textContent = 'Installing game…';
-      await CapacitorUpdater.set(bundle);
+      await ExternalGame.activate({ checksum: latest.checksum });
+      await ExternalGame.open();
       localStorage.removeItem(RESUME_KEY);
       status.textContent = 'Activation requested. If the game does not open, restart the app.';
     } catch (error) {

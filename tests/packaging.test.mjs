@@ -1,10 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-const script = new URL('../scripts/verify-bootstrap.mjs',import.meta.url).pathname;
+const script = fileURLToPath(new URL('../scripts/verify-bootstrap.mjs',import.meta.url));
 function check(files) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pokevoid-bootstrap-'));
   try {

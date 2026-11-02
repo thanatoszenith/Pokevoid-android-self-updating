@@ -8,22 +8,9 @@ const patcher = fs.readFileSync('patches/apply.mjs', 'utf8');
 const bootstrap = fs.readFileSync('bootstrap/main.ts', 'utf8');
 const gate = fs.readFileSync('patches/update-gate.ts', 'utf8');
 
-test('both entrypoints use the resumable downloader before Capgo installation', () => {
-  for (const source of [bootstrap, gate]) {
-    assert.match(source, /ResumableDownload\.download\(/);
-    assert.match(source, /CapacitorUpdater\.download\(\{\s*url: archive\.url/);
-    assert.match(source, /ResumableDownload\.addListener\('progress'/);
-  }
-});
 
-test('native bridge retains partial files and verifies archives before serving', () => {
-  assert.match(native, /getFilesDir\(\)/);
-  assert.match(native, /\.part/);
-  assert.match(native, /setRequestProperty\("Range"/);
-  assert.match(native, /Content-Range/);
-  assert.match(native, /matches\(partial, key\)/);
-  assert.match(native, /127\.0\.0\.1/);
-});
+
+
 
 test('Android build registers the plugin and bundles both TypeScript shims', () => {
   assert.match(workflow, /registerPlugin\(ResumableDownloadPlugin\.class\)/);
@@ -33,27 +20,14 @@ test('Android build registers the plugin and bundles both TypeScript shims', () 
   assert.ok(fs.existsSync('patches/resumable-download.ts'));
 });
 
-test('resumed responses validate byte ranges and archive cleanup happens only after import', () => {
-  assert.match(native, /declaredTotal = Long\.parseLong/);
-  assert.match(native, /Inconsistent Content-Range and Content-Length/);
-  for (const source of [bootstrap, gate]) {
-    const imported = source.indexOf('CapacitorUpdater.download({');
-    const released = source.indexOf('ResumableDownload.releaseArchive(');
-    assert.ok(imported >= 0 && released > imported, 'archive cannot be deleted before import');
-  }
-});
+
 
 test('build patches the generated activity rather than introducing a duplicate', () => {
   assert.match(workflow, /rglob\('MainActivity\.java'\)/);
   assert.doesNotMatch(workflow, /cat > android\/app\/src\/main\/java\/com\/zenni\/pokevoid\/MainActivity\.java/);
 });
 
-test('successful bundles remain recoverable when Capgo omits checksum metadata', () => {
-  for (const source of [bootstrap, gate]) {
-    assert.match(source, /bundle\.status === 'success'/);
-    assert.match(source, /!\(bundle as typeof bundle & \{ checksum\?: string \}\)\.checksum/);
-  }
-});
+
 
 test('publication validates public ZIP before deploying the update feed', () => {
   const publish = fs.readFileSync('.github/workflows/publish-game.yml', 'utf8');
@@ -63,11 +37,7 @@ test('publication validates public ZIP before deploying the update feed', () => 
   assert.match(publish, /curl --head --fail --location/);
 });
 
-test('loopback ZIP server rejects invalid ranges and caps request headers', () => {
-  assert.match(native, /416 Range Not Satisfiable/);
-  assert.match(native, /headerCount > 64/);
-  assert.match(native, /start >= file\.length\(\)/);
-});
+
 
 test('bootstrap does not make redundant cross-origin HEAD requests', () => {
   assert.doesNotMatch(bootstrap, /fetchBundleSize\(/);
@@ -79,12 +49,7 @@ test('bootstrap retry reuses the interrupted download action directly', () => {
   assert.doesNotMatch(bootstrap, /retry\('Retry download', async \(\) => \{ await main\(\); \}\)/);
 });
 
-test('HTTP 416 response uses CRLF escapes, not escaped backslash characters', () => {
-  const line = native.split('\n').find(x => x.includes('416 Range Not Satisfiable'));
-  assert.ok(line);
-  assert.ok(line.includes(String.raw`\r\nContent-Range`));
-  assert.ok(!line.includes(String.raw`\\r\\nContent-Range`));
-});
+
 
 test('network failures retain partial downloads for subsequent HTTP Range retries', () => {
   assert.match(native, /Download interrupted after retries; partial data preserved/);
@@ -95,11 +60,7 @@ test('network failures retain partial downloads for subsequent HTTP Range retrie
   assert.match(native, /Response exceeded declared Content-Range/);
 });
 
-test('oversized HTTP range integers do not terminate the loopback response silently', () => {
-  assert.match(native, /catch \(NumberFormatException invalidRange\)/);
-  assert.match(native, /start = file\.length\(\)/);
-  assert.match(native, /416 Range Not Satisfiable/);
-});
+
 
 test('game update progress listener cleanup cannot invalidate a successful import', () => {
   assert.match(gate, /listener\.remove\(\)\.catch\(/);
@@ -135,12 +96,7 @@ test('native downloader checks each HTTPS redirect and limits redirect hops', ()
   assert.match(native, /if \(!returned\) connection\.disconnect\(\)/);
 });
 
-test('loopback server uses bounded workers instead of spawning threads for every client', () => {
-  assert.match(native, /new ThreadPoolExecutor\(2, 4, 30L, TimeUnit\.SECONDS, new ArrayBlockingQueue<Runnable>\(8\)\)/);
-  assert.match(native, /clients\.execute\(/);
-  assert.match(native, /catch \(RejectedExecutionException busy\)/);
-  assert.doesNotMatch(native, /"pokevoid-archive-client"\)\.start\(\)/);
-});
+
 
 test('background downloads use an Android dataSync foreground service', () => {
   const service = fs.readFileSync('native/DownloadForegroundService.java', 'utf8');
@@ -159,52 +115,13 @@ test('HTTP headers are configured only before the redirect connection is establi
   assert.doesNotMatch(native, /c = openVerifiedConnection\(url, offset\);\s*c\.setRequestProperty/);
 });
 
-test('loopback HTTP parser limits line lengths before buffering and cleanup tracks archive identity', () => {
-  assert.match(native, /private String readLimitedLine\(BufferedReader reader\)/);
-  assert.match(native, /reader\.read\(\)/);
-  assert.match(native, /while \(\(line = readLimitedLine\(reader\)\)/);
-  assert.match(native, /sha\.equalsIgnoreCase\(servedChecksum\)/);
-});
 
-test('root-level PokeVoid storage is explicitly permission-gated and preserves working files', () => {
-  const shared = fs.readFileSync('native/SharedStoragePlugin.java', 'utf8');
-  const bridge = fs.readFileSync('patches/shared-storage.ts', 'utf8');
-  const apply = fs.readFileSync('patches/apply.mjs', 'utf8');
-  assert.match(shared, /Environment\.isExternalStorageManager\(\)/);
-  assert.match(shared, /ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION/);
-  assert.match(shared, /new File\(Environment\.getExternalStorageDirectory\(\), "PokeVoid"\)/);
-  assert.match(shared, /"Game"/);
-  assert.match(shared, /"Saves"/);
-  assert.match(shared, /if \(dest\.exists\(\)\) return/);
-  assert.doesNotMatch(native, /SharedStoragePlugin\.mirrorArchive\(complete, key\)/);
-  assert.match(workflow, /registerPlugin\(SharedStoragePlugin\.class\)/);
-  assert.match(workflow, /MANAGE_EXTERNAL_STORAGE/);
-  assert.match(bridge, /configureSharedStorage/);
-  assert.match(apply, /patches\/shared-storage\.ts/);
-});
 
-test('direct external saves migrate before game boot and persist writes atomically', () => {
-  const direct = fs.readFileSync('patches/direct-saves.ts', 'utf8');
-  const shared = fs.readFileSync('native/SharedStoragePlugin.java', 'utf8');
-  assert.match(patcher, /await initializeDirectSaves\(\)/);
-  assert.match(patcher, /patches\/direct-saves\.ts/);
-  assert.match(direct, /await Native\.readSaves\(\)/);
-  assert.match(direct, /if \(!external\.has\(entry\.key\)\) await Native\.writeSave\(entry\)/);
-  assert.match(direct, /Storage\.prototype\.setItem/);
-  assert.match(direct, /Storage\.prototype\.removeItem/);
-  assert.match(direct, /pokevoid_pre_external_/);
-  assert.match(shared, /File\.createTempFile/);
-  assert.match(shared, /out\.getFD\(\)\.sync\(\)/);
-  assert.match(shared, /readSaves\(PluginCall call\)/);
-  assert.match(shared, /deleteSave\(PluginCall call\)/);
-});
 
-test('native HTTP request parser uses valid Java character escapes', () => {
-  assert.match(native, /if \(c == '\\n'\)/);
-  assert.match(native, /if \(c != '\\r'\)/);
-  assert.doesNotMatch(native, /if \(c == '\\\\n'\)/);
-  assert.doesNotMatch(native, /if \(c != '\\\\r'\)/);
-});
+
+
+
+
 
 test('resumable response validates offsets without requiring an entire suffix', () => {
   assert.match(native, /end < offset \|\| declaredTotal <= end/);
@@ -247,7 +164,7 @@ test('background progress notifications are throttled and permission failures ar
   assert.match(service, /SystemClock\.elapsedRealtime\(\)/);
   assert.match(service, /now - lastNotificationMs < 1000L/);
   assert.match(service, /catch \(SecurityException error\)/);
-  assert.match(native, /catch \(IOException \| SecurityException error\)/);
+
 });
 
 test('background downloads retain CPU access with bounded renewable wake lock', () => {
@@ -267,12 +184,7 @@ test('HTTP resume rejects truncated full responses and range overruns', () => {
   assert.match(native, /if \(code == 416 && offset > 0\)/);
 });
 
-test('bootstrap and update gate keep recovery marker until activation returns', () => {
-  for (const source of [bootstrap, gate]) {
-    assert.match(source, /await CapacitorUpdater\.set\(bundle\);\s*localStorage\.removeItem\(RESUME_KEY\)/);
-    assert.match(source, /await CapacitorUpdater\.set\(ready\);\s*localStorage\.removeItem\(RESUME_KEY\)/);
-  }
-});
+
 
 test('foreground service stays alive until all queued download requests finish', () => {
   assert.match(native, /AtomicInteger activeDownloads/);

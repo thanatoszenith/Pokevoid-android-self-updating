@@ -1,78 +1,72 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
-
-type RecordEntry = { key: string; value: string };
+type Entry = { key: string; value: string };
 const Native = registerPlugin<{
-  status(): Promise<{ granted: boolean; path: string }>;
-  readSaves(): Promise<{ entries: RecordEntry[] }>;
-  writeSave(options: RecordEntry): Promise<void>;
-  deleteSave(options: { key: string }): Promise<void>;
+  status(): Promise<{ granted: boolean }>;
+  readSaves(): Promise<{ entries: Entry[] }>;
+  writeSave(options: Entry): Promise<void>;
 }>('SharedStorage');
 
-// Only game-save records are redirected. Preferences and unrelated WebView state remain internal.
 export const isGameSaveKey = (key: string): boolean =>
   /^(data_|sessionData(?:Battle)?[0-4]?_|data_backup_|runHistoryData_|starterPrefs_)/.test(key);
 
-let pending: Promise<void> = Promise.resolve();
-let active = false;
-const enqueue = (operation: () => Promise<void>) => {
-  pending = pending.then(operation).catch(error => {
-    console.error('[DirectSaves] External write failed; internal recovery copy retained', error);
-    window.alert('PokéVoid could not write a save to external storage. Your internal recovery copy is retained. Check storage access before continuing.');
-    active = false; // stop treating external storage as available after a write failure
-  });
-};
-
 export async function initializeDirectSaves(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
-  const state = await Native.status();
-  if (!state.granted) {
-    console.warn('[DirectSaves] External storage permission missing; existing internal saves preserved');
-    return;
-  }
-  const originalSet = Storage.prototype.setItem;
-  const originalRemove = Storage.prototype.removeItem;
-  // Read and validate the complete external snapshot before modifying any local data.
+  if (!(await Native.status()).granted) throw new Error('External save access is required');
+  const bridge = (window as any).PokeVoidSaves as { write(key: string, value: string): string; remove(key: string): string };
+  if (!bridge) throw new Error('Direct external save bridge missing');
+  const proto = Storage.prototype;
+  const get = proto.getItem, set = proto.setItem, remove = proto.removeItem, clear = proto.clear, keyAt = proto.key;
+  const lengthGetter = Object.getOwnPropertyDescriptor(proto, 'length')!.get!;
   const { entries } = await Native.readSaves();
-  const external = new Map<string, string>();
+  const saves = new Map<string, string>();
   for (const entry of entries) {
-    if (typeof entry.key !== 'string' || typeof entry.value !== 'string' || !isGameSaveKey(entry.key) || external.has(entry.key))
-      throw new Error('Invalid or duplicate external save record');
-    external.set(entry.key, entry.value);
+    if (typeof entry.key !== 'string' || typeof entry.value !== 'string' || !isGameSaveKey(entry.key) || saves.has(entry.key))
+      throw new Error('Invalid external save snapshot');
+    saves.set(entry.key, entry.value);
   }
-  const local: RecordEntry[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && isGameSaveKey(key)) {
-      const value = localStorage.getItem(key);
-      if (value !== null) local.push({ key, value });
+  const legacy: Entry[] = [];
+  for (let i = 0; i < lengthGetter.call(localStorage); i++) {
+    const key = keyAt.call(localStorage, i);
+    if (key && isGameSaveKey(key)) legacy.push({ key, value: get.call(localStorage, key)! });
+  }
+  // External records win. Migrate all missing records successfully before removing legacy keys.
+  for (const entry of legacy) {
+    if (!saves.has(entry.key)) { await Native.writeSave(entry); saves.set(entry.key, entry.value); }
+    else if (saves.get(entry.key) !== entry.value) {
+      const recovery = { key: 'data_backup_pre_external_' + entry.key, value: entry.value };
+      if (!saves.has(recovery.key)) { await Native.writeSave(recovery); saves.set(recovery.key, recovery.value); }
     }
   }
-  // Import missing legacy saves before installing hooks; external records take precedence.
-  // Do not delete internal records: they provide a recovery path if permission is revoked.
-  for (const entry of local) {
-    if (!external.has(entry.key)) await Native.writeSave(entry);
-  }
-  for (const [key, value] of external) {
-    const current = localStorage.getItem(key);
-    if (current !== null && current !== value) {
-      // Preserve the original value outside the synchronized keyspace.
-      originalSet.call(localStorage, 'pokevoid_pre_external_' + key, current);
-    }
-    originalSet.call(localStorage, key, value);
-  }
-  active = true;
-  Storage.prototype.setItem = function(key: string, value: string): void {
-    originalSet.call(this, key, value);
-    if (this === localStorage && active && isGameSaveKey(key)) {
-      enqueue(() => Native.writeSave({ key, value: String(value) }));
-    }
+  for (const entry of legacy) remove.call(localStorage, entry.key);
+  const persist = (error: string) => { if (error) throw new DOMException(error, 'QuotaExceededError'); };
+  const keys = () => {
+    const result: string[] = [];
+    for (let i = 0; i < lengthGetter.call(localStorage); i++) result.push(keyAt.call(localStorage, i)!);
+    return [...new Set([...result, ...saves.keys()])];
   };
-  Storage.prototype.removeItem = function(key: string): void {
-    originalRemove.call(this, key);
-    if (this === localStorage && active && isGameSaveKey(key)) {
-      enqueue(() => Native.deleteSave({ key }));
-    }
+  proto.getItem = function(key: string): string | null {
+    key = String(key);
+    return this === localStorage && isGameSaveKey(key) ? saves.get(key) ?? null : get.call(this, key);
   };
-  // Avoid losing external saves when a game clears WebView storage.
-  window.addEventListener('pagehide', () => { void pending; });
+  proto.setItem = function(key: string, value: string): void {
+    key = String(key); value = String(value);
+    if (this !== localStorage || !isGameSaveKey(key)) { set.call(this, key, value); return; }
+    persist(bridge.write(key, value)); saves.set(key, value);
+  };
+  proto.removeItem = function(key: string): void {
+    key = String(key);
+    if (this !== localStorage || !isGameSaveKey(key)) { remove.call(this, key); return; }
+    persist(bridge.remove(key)); saves.delete(key);
+  };
+  proto.clear = function(): void {
+    if (this !== localStorage) { clear.call(this); return; }
+    for (const key of [...saves.keys()]) { persist(bridge.remove(key)); saves.delete(key); }
+    clear.call(this);
+  };
+  proto.key = function(index: number): string | null {
+    return this === localStorage ? keys()[Number(index) >>> 0] ?? null : keyAt.call(this, index);
+  };
+  Object.defineProperty(proto, 'length', { configurable: true, get() {
+    return this === localStorage ? keys().length : lengthGetter.call(this);
+  } });
 }

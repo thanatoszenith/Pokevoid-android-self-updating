@@ -1,36 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-
-const java = fs.readFileSync('native/ExternalGamePlugin.java', 'utf8');
-const bridge = fs.readFileSync('bootstrap/external-game.ts', 'utf8');
-const workflow = fs.readFileSync('.github/workflows/build.yml', 'utf8');
-
-test('external game installer is registered in the Android build', () => {
-  assert.match(workflow, /ExternalGamePlugin\.java/);
-  assert.match(workflow, /registerPlugin\(ExternalGamePlugin\.class\)/);
-  assert.match(bridge, /registerPlugin</);
+test('both installation flows stage, release the single archive, activate, then open externally', () => {
+  for (const file of ['bootstrap/main.ts', 'patches/update-gate.ts']) {
+    const source = fs.readFileSync(file, 'utf8');
+    const calls = ['ResumableDownload.download(', 'ExternalGame.stage(', 'ResumableDownload.releaseArchive(', 'ExternalGame.activate(', 'ExternalGame.open('];
+    let previous = -1;
+    for (const call of calls) {
+      const index = source.indexOf(call, source.indexOf('ResumableDownload.download('));
+      assert.ok(index > previous, file + ': ' + call); previous = index;
+    }
+    assert.doesNotMatch(source, /CapacitorUpdater/);
+  }
 });
-
-test('external extraction is permission-gated and validates archive paths and hashes', () => {
-  assert.match(java, /Environment\.isExternalStorageManager\(\)/);
-  assert.match(java, /PokeVoid\/Game/);
-  assert.match(java, /matches\(archive, key\)/);
-  assert.match(java, /canonical\.startsWith\(base\)/);
-  assert.match(java, /index\.html/);
+test('WebView uses external HTTPS file hosting, a launch watchdog and scoped confirmation', () => {
+  const source = fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  for (const marker of ['setServerBasePath(base)', 'setServerAssetPath("public")', 'WebSettings.LOAD_NO_CACHE', '180000', 'launchId.equals', 'storage().recover()', 'storage().confirm()']) assert.ok(source.includes(marker), marker);
+  const ready = fs.readFileSync('patches/native-launch.ts','utf8');
+  assert.ok(ready.includes("battle.events.once('create'"));
 });
-
-test('activation preserves previous version until launch confirmation', () => {
-  assert.match(java, /public void activate\(PluginCall call\)/);
-  assert.match(java, /active\.renameTo\(previous\)/);
-  assert.match(java, /staged\.renameTo\(active\)/);
-  assert.match(java, /previous\.renameTo\(active\)/);
-  assert.match(java, /public void confirmLaunch\(PluginCall call\)/);
-  assert.match(java, /deleteTree\(previous\)/);
-  assert.match(java, /public void recover\(PluginCall call\)/);
-});
-
-test('staging never extracts game assets into private app storage', () => {
-  assert.match(java, /new File\(root, "\.staging-"/);
-  assert.doesNotMatch(java, /getContext\(\)\.getFilesDir\(\), "current"/);
+test('build copies every native class and does not install the private updater', () => {
+  const workflow = fs.readFileSync('.github/workflows/build.yml','utf8');
+  assert.ok(workflow.includes('../wrapper/native/*.java'));
+  assert.ok(workflow.includes('pnpm remove @capgo/capacitor-updater'));
+  assert.ok(workflow.includes('registerPlugin(ExternalGamePlugin.class)'));
+  assert.doesNotMatch(workflow, /permission+'\\\\n/);
 });
