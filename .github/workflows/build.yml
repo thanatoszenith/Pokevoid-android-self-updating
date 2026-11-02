@@ -128,6 +128,7 @@ jobs:
           test -s android/app/src/main/java/com/zenni/pokevoid/DownloadForegroundService.java
           test -s android/app/src/main/java/com/zenni/pokevoid/SharedStoragePlugin.java
           grep -Fq 'android:foregroundServiceType="dataSync"' android/app/src/main/AndroidManifest.xml
+          grep -Fq 'android.permission.WAKE_LOCK' android/app/src/main/AndroidManifest.xml
           grep -Fq 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
           cd android && ./gradlew assembleDebug
       - name: Verify artifacts
