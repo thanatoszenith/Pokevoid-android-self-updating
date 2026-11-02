@@ -7,6 +7,7 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 const FEED = '__POKEVOID_UPDATE_FEED__';
 const BUNDLED_VERSION = '__POKEVOID_VERSION__';
 const REQUEST_TIMEOUT_MS = 3000;
+const RESUME_KEY = 'pokevoid_pending_update';
 type Release = { version: string; url: string; checksum: string; features: string[] };
 
 function compareVersions(a: string, b: string): number | null {
@@ -116,9 +117,16 @@ export async function updateBeforeGame(): Promise<boolean> {
   // Capgo needs a readiness acknowledgement on every launch, including offline launches.
   try { await CapacitorUpdater.notifyAppReady(); } catch (error) { console.warn('[UpdateGate] notifyAppReady failed', error); }
   const release = await checkRelease();
-  if (!release || !window.confirm(`PokéVoid ${release.version} is available. Download and install before playing?`)) return true;
+  if (!release) return true;
+  let resume = false;
+  try {
+    const pending = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null');
+    resume = pending?.version === release.version && pending?.checksum === release.checksum;
+  } catch { localStorage.removeItem(RESUME_KEY); }
+  if (!resume && !window.confirm(`PokéVoid ${release.version} is available. Download and install before playing?`)) return true;
   const overlay = showOverlay();
   try {
+    localStorage.setItem(RESUME_KEY, JSON.stringify({ version: release.version, checksum: release.checksum }));
     overlay.message('Downloading update… Gameplay is paused.');
     const mb = (n: number) => (n / 1048576).toFixed(1) + ' MiB';
     let sampleTime = 0;
@@ -151,6 +159,7 @@ export async function updateBeforeGame(): Promise<boolean> {
     const ready = await findReadyBundle(release.version, release.checksum).catch(error => { console.warn('[UpdateGate] Recovery lookup unavailable', error); return undefined; });
     if (ready) {
       overlay.message('Activating previously downloaded update…');
+      localStorage.removeItem(RESUME_KEY);
       await CapacitorUpdater.set(ready);
       return false;
     }
@@ -163,11 +172,13 @@ export async function updateBeforeGame(): Promise<boolean> {
       await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
     } finally { await listener.remove().catch(error => console.warn('[UpdateGate] Progress listener cleanup failed', error)); }
     overlay.message('Installing update…');
+    localStorage.removeItem(RESUME_KEY);
     await CapacitorUpdater.set(bundle); // Capgo switches/reloads the web bundle.
     // Never boot the old document while a bundle switch is underway.
     return false;
   } catch (error) {
     console.error('[UpdateGate] Update failed', error);
+    // Keep the pending marker for automatic recovery on the next app launch.
     overlay.message('Update failed. You can still play the installed version.');
     window.alert('Update failed. The installed version will start.');
     overlay.remove();
