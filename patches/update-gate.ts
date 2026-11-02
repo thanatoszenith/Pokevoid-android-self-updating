@@ -159,8 +159,8 @@ export async function updateBeforeGame(): Promise<boolean> {
     const ready = await findReadyBundle(release.version, release.checksum).catch(error => { console.warn('[UpdateGate] Recovery lookup unavailable', error); return undefined; });
     if (ready) {
       overlay.message('Activating previously downloaded update…');
-      localStorage.removeItem(RESUME_KEY);
       await CapacitorUpdater.set(ready);
+      localStorage.removeItem(RESUME_KEY);
       return false;
     }
     const listener = await ResumableDownload.addListener('progress', ({ downloaded, total }) => report(downloaded, total));
@@ -172,8 +172,8 @@ export async function updateBeforeGame(): Promise<boolean> {
       await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
     } finally { await listener.remove().catch(error => console.warn('[UpdateGate] Progress listener cleanup failed', error)); }
     overlay.message('Installing update…');
-    localStorage.removeItem(RESUME_KEY);
-    await CapacitorUpdater.set(bundle); // Capgo switches/reloads the web bundle.
+    await CapacitorUpdater.set(bundle);
+    localStorage.removeItem(RESUME_KEY); // Capgo switches/reloads the web bundle.
     // Never boot the old document while a bundle switch is underway.
     return false;
   } catch (error) {
