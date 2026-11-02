@@ -164,3 +164,20 @@ test('loopback HTTP parser limits line lengths before buffering and cleanup trac
   assert.match(native, /while \(\(line = readLimitedLine\(reader\)\)/);
   assert.match(native, /sha\.equalsIgnoreCase\(servedChecksum\)/);
 });
+
+test('root-level PokeVoid storage is explicitly permission-gated and preserves working files', () => {
+  const shared = fs.readFileSync('native/SharedStoragePlugin.java', 'utf8');
+  const bridge = fs.readFileSync('patches/shared-storage.ts', 'utf8');
+  const apply = fs.readFileSync('patches/apply.mjs', 'utf8');
+  assert.match(shared, /Environment\.isExternalStorageManager\(\)/);
+  assert.match(shared, /ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION/);
+  assert.match(shared, /new File\(Environment\.getExternalStorageDirectory\(\), "PokeVoid"\)/);
+  assert.match(shared, /"Game"/);
+  assert.match(shared, /"Saves"/);
+  assert.match(shared, /if \(dest\.exists\(\)\) return/);
+  assert.match(native, /SharedStoragePlugin\.mirrorArchive\(complete, key\)/);
+  assert.match(workflow, /registerPlugin\(SharedStoragePlugin\.class\)/);
+  assert.match(workflow, /MANAGE_EXTERNAL_STORAGE/);
+  assert.match(bridge, /configureSharedStorage/);
+  assert.match(apply, /patches\/shared-storage\.ts/);
+});
