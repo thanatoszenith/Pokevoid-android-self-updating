@@ -42,4 +42,4 @@ jobs:
           fi
           VERSION="$(date -u +%Y%m%d.%H%M%S)"
           echo "Publishing upstream $UPSTREAM_SHA as game version $VERSION"
-          gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f version="$VERSION" -f upstream_ref="$UPSTREAM_SHA" -f publish=true
+          gh workflow run publish-game.yml --repo "$GITHUB_REPOSITORY" --ref main -f version="$VERSION" -f upstream_ref="$UPSTREAM_SHA" -f publish=true
