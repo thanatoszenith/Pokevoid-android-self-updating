@@ -94,6 +94,11 @@ function installStorageControl(): void {
   document.body.append(button);
 }
 
+/** Recover a fully downloaded, verified bundle after an app restart without downloading it twice. */
+async function findReadyBundle(version: string, checksum: string) {
+  const { bundles } = await CapacitorUpdater.list();
+  return bundles.find(bundle => bundle.version === version && bundle.status === 'success' && bundle.checksum?.toLowerCase() === checksum.toLowerCase());
+}
 /** Returns false when activation has started and Phaser must NOT boot in this document. */
 export async function updateBeforeGame(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true;
@@ -112,6 +117,12 @@ export async function updateBeforeGame(): Promise<boolean> {
       if (head.ok && Number.isSafeInteger(size) && size > 0) totalBytes = size;
     } catch { /* File size is optional; update still proceeds. */ }
     const mb = (n: number) => (n / 1048576).toFixed(1) + ' MB';
+    const ready = await findReadyBundle(release.version, release.checksum);
+    if (ready) {
+      overlay.message('Activating previously downloaded update…');
+      await CapacitorUpdater.set(ready);
+      return false;
+    }
     const listener = await CapacitorUpdater.addListener('download', ({ percent }) => {
       if (typeof percent !== 'number' || !Number.isFinite(percent)) return;
       overlay.message(totalBytes ? `Downloading update: ${mb(totalBytes * percent / 100)} received • ${mb(totalBytes * (100 - percent) / 100)} remaining` : `Downloading update: ${percent.toFixed(1)}%`);
