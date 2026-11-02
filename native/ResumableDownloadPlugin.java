@@ -27,7 +27,7 @@ public class ResumableDownloadPlugin extends Plugin {
         executor.execute(() -> {
             try {
                 URL source = new URL(url);
-                if (!"https".equals(source.getProtocol())) throw new IOException("HTTPS required");
+                if (!"https".equalsIgnoreCase(source.getProtocol()) || source.getUserInfo() != null || source.getHost().isEmpty()) throw new IOException("Valid HTTPS download URL required");
                 File dir = new File(getContext().getFilesDir(), "resumable-bundles");
                 if (!dir.exists() && !dir.mkdirs()) throw new IOException("Cannot create download directory");
                 String key = sha.toLowerCase(Locale.ROOT);
@@ -145,6 +145,10 @@ public class ResumableDownloadPlugin extends Plugin {
                 lastFailure = error;
                 offset = partial.exists() ? partial.length() : 0;
                 if (offset > 0 && matches(partial, checksum)) return;
+                if (attempt < 4) {
+                    try { Thread.sleep(Math.min(500L * (1L << attempt), 4000L)); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IOException("Download interrupted", interrupted); }
+                }
             } finally {
                 if (c != null) c.disconnect();
             }
