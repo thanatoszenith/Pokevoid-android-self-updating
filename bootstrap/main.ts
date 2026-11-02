@@ -5,6 +5,28 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 const feed = '__POKEVOID_UPDATE_FEED__';
 const status = document.getElementById('status')!;
 const button = document.getElementById('install') as HTMLButtonElement;
+const progressArea = document.getElementById('progress-area') as HTMLDivElement;
+const progressBar = document.getElementById('download-progress') as HTMLProgressElement;
+const progressDetails = document.getElementById('download-details') as HTMLDivElement;
+let downloadStarted = 0;
+let lastPercent = 0;
+function formatDuration(seconds: number): string {
+  const n = Math.max(0, Math.ceil(seconds));
+  return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.floor(n % 3600 / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
+}
+function showProgress(percent?: number) {
+  progressArea.hidden = false;
+  const elapsed = (Date.now() - downloadStarted) / 1000;
+  if (typeof percent === 'number' && Number.isFinite(percent)) lastPercent = Math.max(lastPercent, Math.min(100, Math.max(0, percent)));
+  if (lastPercent > 0) {
+    progressBar.value = lastPercent;
+    const eta = lastPercent >= 100 ? 'Finishing…' : elapsed > 2 ? `About ${formatDuration(elapsed * (100 - lastPercent) / lastPercent)} remaining` : 'Calculating remaining time…';
+    progressDetails.textContent = `${lastPercent.toFixed(1)}% • ${formatDuration(elapsed)} elapsed • ${eta}`;
+  } else {
+    progressBar.removeAttribute('value');
+    progressDetails.textContent = `Downloading • ${formatDuration(elapsed)} elapsed • Waiting for progress…`;
+  }
+}
 let busy = false;
 async function exclusive(action: () => Promise<void>): Promise<void> {
   if (busy) return;
@@ -93,12 +115,25 @@ async function main() {
   retry('Download game', async () => {
     try {
       status.textContent = 'Downloading game… Keep this app open.';
-      const bundle = await CapacitorUpdater.download({url: latest.url, version:latest.version, checksum:latest.checksum});
+      downloadStarted = Date.now();
+      lastPercent = 0;
+      showProgress();
+      const progressListener = await CapacitorUpdater.addListener('download', (event: {percent?: number}) => {
+        showProgress(event.percent);
+      });
+      let bundle;
+      try {
+        bundle = await CapacitorUpdater.download({url: latest.url, version:latest.version, checksum:latest.checksum});
+      } finally {
+        await progressListener.remove();
+      }
+      showProgress(100);
       status.textContent = 'Installing game…';
       await CapacitorUpdater.set(bundle);
       status.textContent = 'Activation requested. If the game does not open, restart the app.';
     } catch (error) {
       console.error(error);
+      progressArea.hidden = true;
       status.textContent = 'Download failed. Check your connection and available storage.';
       retry('Retry download', main);
     }
