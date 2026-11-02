@@ -218,3 +218,17 @@ test('foreground notification shows byte progress even when WebView is backgroun
   assert.match(service, /manager\.notify\(NOTIFICATION_ID/);
   assert.match(native, /DownloadForegroundService\.updateProgress\(getContext\(\), downloaded, total\)/);
 });
+
+test('bounded HTTP 206 segments continue downloading until the full archive is assembled', () => {
+  assert.match(native, /responseEnd = end/);
+  assert.match(native, /done != responseEnd \+ 1/);
+  assert.match(native, /offset = done;\s*attempt--;\s*continue;/);
+});
+
+test('bootstrap resumes a previously initiated download after process restart', () => {
+  assert.match(bootstrap, /pokevoid_pending_bootstrap_download/);
+  assert.match(bootstrap, /localStorage\.setItem\(RESUME_KEY/);
+  assert.match(bootstrap, /pending\?\.version === latest\.version && pending\?\.checksum === latest\.checksum/);
+  assert.match(bootstrap, /void exclusive\(install\)/);
+  assert.match(bootstrap, /localStorage\.removeItem\(RESUME_KEY\)/);
+});
