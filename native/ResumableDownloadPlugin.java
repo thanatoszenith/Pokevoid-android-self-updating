@@ -11,10 +11,16 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.RejectedExecutionException;
 
 @CapacitorPlugin(name = "ResumableDownload")
 public class ResumableDownloadPlugin extends Plugin {
     private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService clients = new ThreadPoolExecutor(2, 4, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(8));
     private volatile ServerSocket server;
     private volatile String serverToken;
 
@@ -71,6 +77,42 @@ public class ResumableDownloadPlugin extends Plugin {
         });
     }
 
+    private HttpURLConnection openVerifiedConnection(URL source, long offset) throws IOException {
+        URL target = source;
+        for (int hop = 0; hop <= 8; hop++) {
+            if (!"https".equalsIgnoreCase(target.getProtocol()) || target.getUserInfo() != null
+                    || target.getHost() == null || target.getHost().isEmpty()) {
+                throw new IOException("Unsafe download redirect refused");
+            }
+            HttpURLConnection connection = (HttpURLConnection) target.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(20000);
+            connection.setReadTimeout(30000);
+            connection.setRequestProperty("Accept-Encoding", "identity");
+            if (offset > 0) connection.setRequestProperty("Range", "bytes=" + offset + "-");
+            try {
+                int status = connection.getResponseCode();
+                if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
+                    String location = connection.getHeaderField("Location");
+                    if (location == null || location.isEmpty()) throw new IOException("Redirect missing Location");
+                    URL next = new URL(target, location);
+                    if (!"https".equalsIgnoreCase(next.getProtocol()) || next.getUserInfo() != null) {
+                        throw new IOException("Non-HTTPS or credential-bearing redirect refused");
+                    }
+                    target = next;
+                    continue;
+                }
+                return connection;
+            } finally {
+                if (connection.getHeaderField("Location") != null &&
+                        (connection.getResponseCode() == 301 || connection.getResponseCode() == 302 ||
+                         connection.getResponseCode() == 303 || connection.getResponseCode() == 307 ||
+                         connection.getResponseCode() == 308)) connection.disconnect();
+            }
+        }
+        throw new IOException("Too many download redirects");
+    }
+
     private void fetch(URL url, File partial, String checksum) throws Exception {
         long offset = partial.exists() ? partial.length() : 0;
         if (offset > 0 && matches(partial, checksum)) {
@@ -83,14 +125,11 @@ public class ResumableDownloadPlugin extends Plugin {
         for (int attempt = 0; attempt < 5; attempt++) {
             HttpURLConnection c = null;
             try {
-                c = (HttpURLConnection) url.openConnection();
-                c.setConnectTimeout(20000);
-                c.setReadTimeout(30000);
-                c.setInstanceFollowRedirects(true);
+                c = openVerifiedConnection(url, offset);
                 c.setRequestProperty("Accept-Encoding", "identity");
                 if (offset > 0) c.setRequestProperty("Range", "bytes=" + offset + "-");
                 int code = c.getResponseCode();
-                if (!"https".equalsIgnoreCase(c.getURL().getProtocol())) throw new IOException("Non-HTTPS redirect refused");
+
                 if (code == 416 && offset > 0) {
                     if (matches(partial, checksum)) return;
                     if (!partial.delete()) throw new IOException("Cannot reset invalid partial download");
@@ -195,7 +234,8 @@ public class ResumableDownloadPlugin extends Plugin {
     }
 
     private void executorForClient(Socket client, File file, String token) {
-        new Thread(() -> {
+        try {
+            clients.execute(() -> {
             try (Socket s = client; BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII))) {
                 s.setSoTimeout(30000);
                 String request = reader.readLine();
@@ -232,6 +272,9 @@ public class ResumableDownloadPlugin extends Plugin {
                 }
                 out.flush();
             } catch (Exception ignored) {}
-        }, "pokevoid-archive-client").start();
+            });
+        } catch (RejectedExecutionException busy) {
+            try { client.close(); } catch (IOException ignored) {}
+        }
     }
 }
