@@ -214,7 +214,7 @@ test('resumable response validates offsets without requiring an entire suffix', 
 
 test('foreground notification shows byte progress even when WebView is backgrounded', () => {
   const service = fs.readFileSync('native/DownloadForegroundService.java', 'utf8');
-  assert.match(service, /static void updateProgress\(Context context, long downloaded, long total\)/);
+  assert.match(service, /static synchronized void updateProgress\(Context context, long downloaded, long total\)/);
   assert.match(service, /setProgress\(100, percent, false\)/);
   assert.match(service, /manager\.notify\(NOTIFICATION_ID/);
   assert.match(native, /DownloadForegroundService\.updateProgress\(getContext\(\), downloaded, total\)/);
@@ -223,7 +223,7 @@ test('foreground notification shows byte progress even when WebView is backgroun
 test('bounded HTTP 206 segments continue downloading until the full archive is assembled', () => {
   assert.match(native, /responseEnd = end/);
   assert.match(native, /done != responseEnd \+ 1/);
-  assert.match(native, /offset = done;\s*attempt--;\s*continue;/);
+  assert.match(native, /offset = done;\s*if \(\+\+successfulSegments > 8192\) throw new IOException\("Too many bounded range responses"\);[\s\S]*?attempt--;\s*continue;/);
 });
 
 test('bootstrap resumes a previously initiated download after process restart', () => {
