@@ -68,12 +68,17 @@ async function cleanUnusedBundles(): Promise<void> {
   const activeId = current.bundle?.id;
   if (!activeId || activeId === 'builtin') throw new Error('Active game bundle could not be verified');
   const result = await CapacitorUpdater.list();
-  const unused = result.bundles.filter(b => b.id && b.id !== activeId && b.id !== 'builtin');
+  // Keep any bundle marked for activation or currently being downloaded; cleanup is conservative.
+  const unused = result.bundles.filter(b => b.id && b.id !== activeId && b.id !== 'builtin' && b.status === 'success');
   if (!unused.length) { window.alert('No unused game bundles found.'); return; }
   if (!window.confirm(`Delete ${unused.length} unused game bundle(s)? The active game and saves will be kept.`)) return;
   let removed = 0;
   for (const bundle of unused) {
-    try { await CapacitorUpdater.delete({ id: bundle.id }); removed++; }
+    try {
+      const latest = await CapacitorUpdater.current();
+      if (latest.bundle?.id !== activeId) throw new Error('Active bundle changed during cleanup');
+      await CapacitorUpdater.delete({ id: bundle.id }); removed++;
+    }
     catch (error) { console.warn('[UpdateGate] Failed to delete inactive bundle', bundle.id, error); }
   }
   window.alert(`Removed ${removed} of ${unused.length} unused game bundles. Saves were not touched.`);
