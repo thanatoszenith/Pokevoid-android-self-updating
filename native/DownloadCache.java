@@ -30,6 +30,16 @@ public final class DownloadCache {
     public static boolean mayBeComplete(long bytes, long total) {
         return bytes > 0 && (total < 0 || bytes == total);
     }
+    /** Delete an archive exactly once it is no longer being read or written. Safe to repeat. */
+    public static synchronized boolean release(File dir, String checksum) throws IOException {
+        if (checksum == null || !checksum.matches("[a-fA-F0-9]{64}")) throw new IOException("Invalid archive checksum");
+        String key = checksum.toLowerCase(Locale.ROOT);
+        File complete = new File(dir, key + ".zip"), partial = new File(dir, key + ".part");
+        if (inUse(complete) || inUse(partial)) return false;
+        for (File file : new File[]{complete, partial})
+            if (file.exists() && !file.delete()) throw new IOException("Cannot remove consumed download archive");
+        return true;
+    }
     public static synchronized void clean(File dir, String keep) throws IOException {
         File[] files = dir.listFiles((d, n) -> n.matches("[a-f0-9]{64}\\.(part|zip)"));
         if (files == null) return;

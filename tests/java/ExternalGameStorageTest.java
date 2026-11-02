@@ -51,9 +51,32 @@ public final class ExternalGameStorageTest {
             check(DownloadCache.mayBeComplete(100,100),"complete response is verified");
             check(DownloadCache.mayBeComplete(100,-1),"unknown length can be complete");
             check(!DownloadCache.mayBeComplete(0,-1),"empty partial skipped");
+            File privateFiles = new File(base,"private/files"), privateCache = new File(base,"private/cache");
+            for (String name : new String[]{"resumable-bundles","versions","public","preferences","Saves"}) {
+                File dir = new File(privateFiles,name); dir.mkdirs(); marker(dir,"keep-or-remove","fixture");
+            }
+            new File(privateCache,"capgo_downloads").mkdirs(); marker(new File(privateCache,"capgo_downloads"),"archive","fixture");
+            StorageMaintenance.removeRetiredInternal(privateFiles,privateCache);
+            check(!new File(privateFiles,"resumable-bundles").exists(),"no retired internal download cache");
+            check(!new File(privateFiles,"versions").exists() && !new File(privateFiles,"public").exists(),"no retired internal game copies");
+            check(new File(privateFiles,"preferences/keep-or-remove").exists() && new File(privateFiles,"Saves/keep-or-remove").exists(),"internal preferences and unmigrated saves preserved");
+            check(!new File(privateCache,"capgo_downloads").exists(),"retired internal HTTP cache removed");
+            StorageMaintenance.removeRetiredInternal(privateFiles,privateCache);
             File archive = zip(base,"valid.zip","index.html","assets/main.js");
             File root = new File(base,"game");
             ExternalGameStorage store = oldGame(root);
+            check(store.downloads().equals(new File(root,".downloads")),"archive directory is external alongside current");
+            check(store.downloads().isDirectory(),"external archive directory created");
+            String consumedKey = "d".repeat(64);
+            marker(store.downloads(),consumedKey+".zip","archive");
+            marker(store.downloads(),consumedKey+".part","partial");
+            try (DownloadCache.Lease lease = DownloadCache.hold(new File(store.downloads(),consumedKey+".zip"))) {
+                check(!DownloadCache.release(store.downloads(),consumedKey),"active extraction archive cannot be released");
+                check(new File(store.downloads(),consumedKey+".zip").exists(),"in-use archive retained");
+            }
+            check(DownloadCache.release(store.downloads(),consumedKey),"consumed archive removed immediately");
+            check(!new File(store.downloads(),consumedKey+".zip").exists() && !new File(store.downloads(),consumedKey+".part").exists(),"no compressed duplicate remains");
+            check(DownloadCache.release(store.downloads(),consumedKey),"archive release is idempotent");
             fails(() -> store.stage(archive, "0".repeat(64), "2"));
             for (String bad : new String[]{"../escape","/escape","a/../escape","a\\escape"}) {
                 File unsafe = zip(base,"unsafe.zip","index.html",bad);
@@ -72,7 +95,7 @@ public final class ExternalGameStorageTest {
             check(store.version().equals("1") && !store.pending(),"unconfirmed boot rolled back idempotently");
             store.stage(archive,sha(archive),"2"); store.activate(sha(archive)); store.confirm(); store.recover();
             check(store.version().equals("2"),"confirmed version retained");
-            check(Arrays.equals(root.list((d,n)->n.startsWith(".")),new String[]{".failed"}),"no old game or staging after confirmation");
+            check(new HashSet<>(Arrays.asList(root.list((d,n)->n.startsWith(".")))).equals(new HashSet<>(Arrays.asList(".downloads",".failed"))),"no old game or staging after confirmation");
             // Every rename boundary, including a crash during rollback itself.
             for (int phase=0; phase<5; phase++) {
                 File r = new File(base,"phase"+phase); ExternalGameStorage x = oldGame(r);

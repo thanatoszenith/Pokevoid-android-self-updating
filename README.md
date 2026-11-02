@@ -13,12 +13,14 @@ opens the installed external game offline, or offers a first download. The game
 checks for newer versions before Phaser starts. Both paths use the same native
 downloader, SHA-256 validation, external extraction, activation and WebView loading.
 
-One resumable archive exists under app-private `files/resumable-bundles`.
+One resumable archive exists at `PokeVoid/Game/.downloads`, alongside the external
+game. Large downloads never use app-private storage.
 It is renamed from `.part` to `.zip`, never copied or served through HTTP.
 Extraction uses the external `.staging` directory, rejects traversal and duplicate
 paths, limits entries to 200,000 and extracted bytes to 4 GiB, and syncs file contents.
-The archive is removed after extraction. A completed archive can be reused after an
-interrupted download.
+Native extraction removes its ZIP and partial file when the extraction attempt
+finishes, even if JavaScript is interrupted. A completed archive can be reused after
+an interrupted download, before extraction starts.
 
 Activation writes a journal before renaming `current` to `.previous` and staging
 to `current`. Every startup recovers unfinished transactions. The deferred title-screen
@@ -47,7 +49,7 @@ before gameplay, and only then removed from internal storage. Conflicting legacy
 values are preserved once under external `data_backup_pre_external_*` records.
 External permission loss blocks saves instead of silently writing an internal copy.
 
-Downloader cleanup retains at most one owned archive/partial, no more than 4 GiB
+External downloader cleanup retains at most one owned archive/partial, no more than 4 GiB
 and no older than 48 hours at cleanup. In-use download or extraction files are
 protected until their operations finish. It runs at startup, before downloads and after
 confirmed launch. Unrelated files are preserved. WebView HTTP caching is disabled;
@@ -55,10 +57,16 @@ CacheStorage and service worker registrations are cleared before native gameplay
 and new asset-cache registration is disabled. The official daily cache remains one
 small current-day record.
 
-After successful external launch, exact retired updater directories
-(`files/versions`, `cache/capgo_downloads`) and checksum-named external staging,
-release and mirrored ZIP leftovers are removed. Saves and arbitrary user files are
-excluded.
+At startup, retired internal asset directories (`files/versions`, `files/public`,
+`files/resumable-bundles`, `cache/capgo_downloads`) are removed. Old private downloads
+are discarded and restart externally instead of creating a migration ZIP copy.
+After a successful launch, checksum-named external staging, releases and mirrored
+ZIP leftovers are removed. Saves and arbitrary user files are excluded.
+
+WebView resource caches are cleared at startup, on game switches and when the app
+is paused. Native HTTP downloads also disable response caching. Android still
+requires internal storage for the installed APK, runtime files, small preferences
+and WebView profile metadata; these are not duplicate game installations.
 
 ## Build and release
 

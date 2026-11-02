@@ -12,6 +12,14 @@ public final class ExternalGameStorage {
     private final File root;
     public ExternalGameStorage(File root) { this.root = root; }
     private File file(String name) { return new File(root, name); }
+    public File downloads() throws IOException {
+        ensureRoot();
+        File downloads = file(".downloads");
+        if (!downloads.isDirectory() && !downloads.mkdir()) throw new IOException("Cannot create external download directory");
+        if (!downloads.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator))
+            throw new IOException("Download directory escapes game storage");
+        return downloads;
+    }
     public File current() { return file("current"); }
     public boolean installed() { return new File(current(), "index.html").isFile(); }
     public boolean pending() { return file(".pending").exists(); }

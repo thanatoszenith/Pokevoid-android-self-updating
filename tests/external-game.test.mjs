@@ -73,3 +73,25 @@ test('startup cleans orphaned save transactions on the shared writer queue',()=>
   assert.ok(shared.includes('NativeSaveQueue.cleanTemporarySaves(dir)'));
   assert.ok(shared.indexOf('NativeSaveQueue.execute')<shared.indexOf('NativeSaveQueue.cleanTemporarySaves'));
 });
+
+test('download and install paths use external archives exclusively',()=>{
+  const downloader=fs.readFileSync('native/ResumableDownloadPlugin.java','utf8');
+  const installer=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  assert.ok(downloader.includes('ExternalGamePaths.downloads()'));
+  assert.doesNotMatch(downloader,/getFilesDir|resumable-bundles/);
+  assert.ok(installer.includes('storage().downloads()'));
+  assert.doesNotMatch(installer,/new File\(getContext\(\).getFilesDir/);
+  assert.ok(installer.includes('DownloadCache.release(downloads, sha)'));
+});
+test('internal cleanup excludes profiles and runs even before a first external installation',()=>{
+  const installer=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  const cleanup=fs.readFileSync('native/StorageMaintenance.java','utf8');
+  assert.ok(installer.includes('worker.execute(this::cleanInternalStorage)'));
+  assert.doesNotMatch(cleanup,/deleteAllData|app_webview/);
+  assert.ok(installer.includes('handleOnPause()'));
+  assert.ok((installer.match(/clearCache\(true\)/g)||[]).length>=4);
+});
+test('native HTTPS downloads do not use an internal response cache',()=>{
+  const downloader=fs.readFileSync('native/ResumableDownloadPlugin.java','utf8');
+  assert.ok(downloader.includes('connection.setUseCaches(false)'));
+});

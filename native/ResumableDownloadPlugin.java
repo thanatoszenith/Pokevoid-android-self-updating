@@ -37,7 +37,7 @@ public class ResumableDownloadPlugin extends Plugin {
             try {
                 URL source = new URL(url);
                 if (!"https".equalsIgnoreCase(source.getProtocol()) || source.getUserInfo() != null || source.getHost().isEmpty()) throw new IOException("Valid HTTPS download URL required");
-                File dir = new File(getContext().getFilesDir(), "resumable-bundles");
+                File dir = ExternalGamePaths.downloads();
                 if (!dir.exists() && !dir.mkdirs()) throw new IOException("Cannot create download directory");
                 String key = sha.toLowerCase(Locale.ROOT);
                 File partial = new File(dir, key + ".part"), complete = new File(dir, key + ".zip");
@@ -81,12 +81,8 @@ public class ResumableDownloadPlugin extends Plugin {
         }
         executor.execute(() -> {
             try {
-                File dir = new File(getContext().getFilesDir(), "resumable-bundles");
-                File archive = new File(dir, sha.toLowerCase(Locale.ROOT) + ".zip");
-                if (DownloadCache.inUse(archive)) throw new IOException("Archive is still in use");
-                if (archive.exists() && !archive.delete()) throw new IOException("Could not remove imported archive");
-                File partial = new File(dir, sha.toLowerCase(Locale.ROOT) + ".part");
-                if (partial.exists() && !partial.delete()) throw new IOException("Could not remove obsolete partial archive");
+                File dir = ExternalGamePaths.downloads();
+                if (!DownloadCache.release(dir, sha)) throw new IOException("Archive is still in use");
                 call.resolve();
             } catch (Exception error) { call.reject("Archive cleanup failed", error); }
         });
@@ -101,6 +97,7 @@ public class ResumableDownloadPlugin extends Plugin {
             }
             HttpURLConnection connection = (HttpURLConnection) target.openConnection();
             connection.setInstanceFollowRedirects(false);
+            connection.setUseCaches(false);
             connection.setConnectTimeout(20000);
             connection.setReadTimeout(30000);
             connection.setRequestProperty("Accept-Encoding", "identity");

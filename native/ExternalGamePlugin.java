@@ -1,7 +1,5 @@
 package com.zenni.pokevoid;
 
-import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.*;
@@ -22,10 +20,10 @@ public class ExternalGamePlugin extends Plugin {
     private volatile boolean waiting;
     private volatile String launchId = "";
     private final Runnable timeout = () -> { if (waiting) rollback(); };
-    private ExternalGameStorage storage() throws IOException {
-        if (Build.VERSION.SDK_INT < 30 || !Environment.isExternalStorageManager())
-            throw new IOException("Enable All files access to use PokeVoid/Game");
-        return new ExternalGameStorage(new File(Environment.getExternalStorageDirectory(), "PokeVoid/Game"));
+    private ExternalGameStorage storage() throws IOException { return ExternalGamePaths.storage(); }
+    private void cleanInternalStorage() {
+        try { StorageMaintenance.removeRetiredInternal(getContext().getFilesDir(), getContext().getCacheDir()); }
+        catch (IOException error) { android.util.Log.w("PokeVoid", "Internal asset cleanup will retry", error); }
     }
     private void onUi(Runnable action) {
         ui.post(() -> { if (!destroyed) action.run(); });
@@ -40,8 +38,10 @@ public class ExternalGamePlugin extends Plugin {
     }
     @Override public void load() {
         getBridge().injectScriptBeforeLoad("save-compat.js");
+        worker.execute(this::cleanInternalStorage);
         onUi(() -> {
             getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+            getBridge().getWebView().clearCache(true);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     if (launched && "localhost".equals(request.getUrl().getHost())) {
@@ -81,7 +81,7 @@ public class ExternalGamePlugin extends Plugin {
     @PluginMethod public void recover(PluginCall call) {
         execute(call, () -> {
             if (launched) throw new IOException("Cannot recover a running game");
-            storage().recover(); DownloadCache.clean(new File(getContext().getFilesDir(), "resumable-bundles"), null);
+            storage().recover(); DownloadCache.clean(storage().downloads(), null);
             call.resolve(state());
         });
     }
@@ -89,9 +89,16 @@ public class ExternalGamePlugin extends Plugin {
         execute(call, () -> {
             String sha = call.getString("checksum");
             if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) throw new IOException("Invalid checksum");
-            File archive = new File(new File(getContext().getFilesDir(), "resumable-bundles"), sha.toLowerCase(java.util.Locale.ROOT) + ".zip");
-            try (DownloadCache.Lease lease = DownloadCache.hold(archive)) {
-                storage().stage(archive, sha, call.getString("version"));
+            File downloads = storage().downloads();
+            File archive = new File(downloads, sha.toLowerCase(java.util.Locale.ROOT) + ".zip");
+            try {
+                try (DownloadCache.Lease lease = DownloadCache.hold(archive)) {
+                    storage().stage(archive, sha, call.getString("version"));
+                }
+            } finally {
+                // Cleanup belongs to native extraction, even if the old JS document disappears.
+                try { DownloadCache.release(downloads, sha); }
+                catch (IOException error) { android.util.Log.w("PokeVoid", "Archive cleanup will retry", error); }
             }
             call.resolve();
         });
@@ -134,15 +141,14 @@ public class ExternalGamePlugin extends Plugin {
         execute(call, () -> {
             if (!launched || !launchId.equals(call.getString("launchId"))) throw new IOException("Stale launch confirmation");
             storage().confirm(); waiting = false; ui.removeCallbacks(timeout);
-            DownloadCache.clean(new File(getContext().getFilesDir(), "resumable-bundles"), "");
+            DownloadCache.clean(storage().downloads(), "");
             cleanLegacyAssets();
             call.resolve();
         });
     }
     private void cleanLegacyAssets() throws IOException {
         // Exact directories owned by the retired updater; never WebView data or saves.
-        ExternalGameStorage.removeTree(new File(getContext().getFilesDir(), "versions"));
-        ExternalGameStorage.removeTree(new File(getContext().getCacheDir(), "capgo_downloads"));
+        cleanInternalStorage();
         File root = storage().current().getParentFile();
         File[] leftovers = root.listFiles((dir, name) -> name.matches("(\\.staging-[a-f0-9]{64}|pokevoid-[a-f0-9]{64}\\.zip)"));
         if (leftovers != null) for (File item : leftovers) ExternalGameStorage.removeTree(item);
@@ -161,7 +167,10 @@ public class ExternalGamePlugin extends Plugin {
             });
         });
     }
-    @Override protected void handleOnPause() { ui.removeCallbacks(timeout); }
+    @Override protected void handleOnPause() {
+        ui.removeCallbacks(timeout);
+        getBridge().getWebView().clearCache(true);
+    }
     @Override protected void handleOnResume() { if (waiting) ui.postDelayed(timeout, 180000); }
     @Override protected void handleOnDestroy() { destroyed = true; ui.removeCallbacksAndMessages(null); }
 }
