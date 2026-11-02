@@ -59,10 +59,12 @@ public class ResumableDownloadPlugin extends Plugin {
             c.setRequestProperty("Accept-Encoding", "identity");
             if (offset > 0) c.setRequestProperty("Range", "bytes=" + offset + "-");
             int code = c.getResponseCode();
+            if (!"https".equalsIgnoreCase(c.getURL().getProtocol())) throw new IOException("Redirect to non-HTTPS URL refused");
             if (code != 200 && code != 206) throw new IOException("HTTP " + code);
+            if (offset == 0 && code == 206) throw new IOException("Unexpected partial response without range request");
             if (offset > 0 && code == 206) {
                 String range = c.getHeaderField("Content-Range");
-                if (range == null || !range.startsWith("bytes " + offset + "-")) {
+                if (range == null || !range.matches("bytes " + offset + "-[0-9]+/[0-9]+")) {
                     c.disconnect(); partial.delete(); offset = 0; continue;
                 }
             } else if (offset > 0) {
@@ -83,6 +85,9 @@ public class ResumableDownloadPlugin extends Plugin {
                     }
                 }
                 output.getFD().sync();
+                JSObject event = new JSObject();
+                event.put("downloaded", done); event.put("total", total);
+                notifyListeners("progress", event);
                 if (total >= 0 && done != total) throw new IOException("Incomplete HTTP response");
             } finally { c.disconnect(); }
             return;
