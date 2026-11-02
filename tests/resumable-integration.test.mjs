@@ -272,3 +272,9 @@ test('bootstrap and update gate keep recovery marker until activation returns', 
     assert.match(source, /await CapacitorUpdater\.set\(ready\);\s*localStorage\.removeItem\(RESUME_KEY\)/);
   }
 });
+
+test('foreground service stays alive until all queued download requests finish', () => {
+  assert.match(native, /AtomicInteger activeDownloads/);
+  assert.match(native, /activeDownloads\.incrementAndGet\(\)/);
+  assert.match(native, /activeDownloads\.decrementAndGet\(\) == 0/);
+});
