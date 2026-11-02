@@ -1,10 +1,14 @@
 # PokéVoid Android external game launcher
 
-The APK contains a small installer. Playable game files live only at
+The APK contains a small installer and uses the supplied PNG artwork for both
+legacy and adaptive Android launcher icons. Playable game files live only at
 `/storage/emulated/0/PokeVoid/Game/current`. The native ExternalGame plugin points
 Capacitor's HTTPS WebView file host at that directory, keeping `https://localhost`
 and native plugins available without importing game assets into private bundles.
-Android 11 or newer and the user's All files access grant are required.
+Android 11 or newer and the user's All files access grant are required. On first
+launch the app opens Android's special-access settings automatically, without a
+folder-access button. It checks access again when you return and continues after
+the grant. Denial does not trigger a repeated settings loop.
 
 ## Installation and updates
 
@@ -83,7 +87,7 @@ Run **Publish PokéVoid game bundle (no APK)** with a new numeric dotted version
 `publish=true` to make a matching bundle available to this launcher. Updating
 native loading requires installing the new APK as well as publishing the game ZIP.
 
-Run `node --test tests/*.test.mjs` with Node 22+, a JDK, Python and unzip installed.
+Run `node --test tests/*.test.mjs` with Node 22+, a JDK, Python with Pillow and unzip installed.
 Tests execute the real Java installer with malformed archives and simulated crashes,
 exercise external save migration/write failures, and verify publication and packaging.
 The generated Android build is verified by GitHub Actions. A physical-device check
@@ -108,3 +112,8 @@ a download or extraction still in progress.
 
 Startup also removes unfinished app-owned save transaction files on the shared
 writer queue. Committed save records and unrelated user files are preserved.
+
+If the published feed lacks the external-game capability, the installer now reports
+an outdated published game release instead of incorrectly blaming connectivity.
+Publish a new version (for example 1.1.0) through the game publication workflow;
+never overwrite the immutable 1.0.0 ZIP.

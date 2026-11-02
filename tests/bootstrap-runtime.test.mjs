@@ -6,13 +6,15 @@ import { stripTypeScriptTypes } from 'node:module';
 
 const checksum = 'a'.repeat(64);
 const tick = () => new Promise(resolve => setImmediate(resolve));
-async function fixture({pending=true,failed=false,openFails=false}={}) {
+async function fixture({pending=true,failed=false,openFails=false,granted=true,grantOnRequest=true,externalFeature=true}={}) {
   const calls=[];
+  let storageGranted=granted, accessRequests=0, addedButtons=0;
+  const nativeListeners=new Map();
   const values=new Map(pending?[['pokevoid_pending_bootstrap_download',JSON.stringify({version:'2',checksum})]]:[]);
   const localStorage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};
   const element=()=>({textContent:'',disabled:false,hidden:true,style:{},removeAttribute(){},value:0});
   const elements=new Map();
-  const document={getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);},createElement:element,body:{append(){}}};
+  const document={hidden:false,addEventListener(){},getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);},createElement:element,body:{append(){addedButtons++;}}};
   const ExternalGame={
     recover:async()=>({installed:false}),status:async()=>({failedChecksum:failed?checksum:''}),
     stage:async()=>calls.push('stage'),activate:async()=>calls.push('activate'),
@@ -20,15 +22,19 @@ async function fixture({pending=true,failed=false,openFails=false}={}) {
     abortLaunch:async()=>calls.push('abort'),
   };
   const source=fs.readFileSync('bootstrap/main.ts','utf8').replace(/^import .*;$/gm,'').replace("'__POKEVOID_UPDATE_FEED__'","'https://owner.github.io/repo/capacitor-update.json'");
-  const context=vm.createContext({console,URL,document,localStorage,Date,ExternalGame,Capacitor:{isNativePlatform:()=>true},
-    SharedStorage:{status:async()=>({granted:true}),createFolders:async()=>{}},
+  const context=vm.createContext({console,URL,document,localStorage,Date,ExternalGame,window:{addEventListener(){}},Capacitor:{isNativePlatform:()=>true},
+    SharedStorage:{
+      status:async()=>({granted:storageGranted}),createFolders:async()=>{},
+      requestAccess:async()=>{accessRequests++;storageGranted=grantOnRequest;return {granted:storageGranted};},
+      addListener:async(name,callback)=>{nativeListeners.set(name,callback);return {remove:async()=>{}};}
+    },
     clearNativeAssetCaches:async()=>{},configureSharedStorage:async()=>{},
-    readUpdateFeed:async()=>({version:'2',checksum,url:'https://github.com/owner/repo/releases/download/game-feed/pokevoid-game-2.zip',features:['offline-daily-v1','official-daily-cache-v1','external-game-v1']}),
+    readUpdateFeed:async()=>({version:'2',checksum,url:'https://github.com/owner/repo/releases/download/game-feed/pokevoid-game-2.zip',features:['offline-daily-v1','official-daily-cache-v1',...(externalFeature?['external-game-v1']:[])]}),
     ResumableDownload:{addListener:async()=>({remove:async()=>{}}),download:async()=>calls.push('download'),releaseArchive:async()=>calls.push('release')},
   });
   vm.runInContext(stripTypeScriptTypes(source),context);
   await tick();
-  return {calls,values,elements,click:async()=>{elements.get('install').onclick();await tick();}};
+  return {calls,values,elements,accessRequests:()=>accessRequests,addedButtons:()=>addedButtons,resumeAccess:async()=>{storageGranted=true;nativeListeners.get('accessChanged')?.({granted:true});await tick();},click:async()=>{elements.get('install').onclick();await tick();}};
 }
 test('interrupted bootstrap download resumes inside the existing startup lock',async()=>{
   const x=await fixture();
@@ -48,4 +54,25 @@ test('failed host switching invokes rollback after promotion',async()=>{
 test('a fresh installation waits for a user download action',async()=>{
   const x=await fixture({pending:false});assert.deepEqual(x.calls,[]);
   await x.click();assert.equal(x.calls[0],'download');
+});
+
+test('first launch opens Android access settings automatically and continues after the grant',async()=>{
+  const x=await fixture({pending:false,granted:false});
+  assert.equal(x.accessRequests(),1);
+  assert.equal(x.addedButtons(),0);
+  assert.equal(x.elements.get('install').hidden,false);
+  await x.click();assert.equal(x.calls[0],'download');
+});
+test('denied access neither shows an access button nor repeatedly reopens settings; resume continues automatically',async()=>{
+  const x=await fixture({pending:false,granted:false,grantOnRequest:false});
+  assert.equal(x.accessRequests(),1);assert.equal(x.addedButtons(),0);
+  assert.equal(x.elements.get('install').hidden,true);assert.deepEqual(x.calls,[]);
+  await x.resumeAccess();
+  assert.equal(x.accessRequests(),1);assert.equal(x.elements.get('install').hidden,false);
+  await x.click();assert.equal(x.calls[0],'download');
+});
+test('the currently published legacy feed is diagnosed as outdated rather than a connection failure',async()=>{
+  const x=await fixture({pending:false,externalFeature:false});
+  assert.match(x.elements.get('status').textContent,/published game download is outdated/);
+  assert.deepEqual(x.calls,[]);
 });

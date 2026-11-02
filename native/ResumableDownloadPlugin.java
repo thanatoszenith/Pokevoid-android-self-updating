@@ -62,7 +62,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     result.put("checksum", key);
                     call.resolve(result);
                 }
-            } catch (Exception error) { call.reject("Resumable download failed", error); }
+            } catch (Exception error) { call.reject("Game download failed: " + (error.getMessage() == null ? "Please retry" : error.getMessage()), error); }
             finally {
                 if (activeDownloads.decrementAndGet() == 0)
                     getContext().stopService(new Intent(getContext(), DownloadForegroundService.class));

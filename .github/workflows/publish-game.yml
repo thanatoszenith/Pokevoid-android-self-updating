@@ -62,6 +62,8 @@ jobs:
           node --check ../wrapper/patches/apply.mjs
           node -e 'const u=new URL(process.env.POKEVOID_UPDATE_FEED);if(u.protocol!=="https:" || u.username || u.password || u.hash)process.exit(1)'
           node -e 'const v=process.env.POKEVOID_VERSION;if(!/^\d+(?:\.\d+)*$/.test(v)||v.split(".").some(x=>!Number.isSafeInteger(Number(x))))process.exit(1)'
+      - name: Install icon test dependency
+        run: python3 -m pip install --user pillow
       - name: Run local build-script tests
         working-directory: wrapper
         run: node --test tests/*.test.mjs

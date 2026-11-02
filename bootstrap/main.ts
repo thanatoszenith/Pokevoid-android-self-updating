@@ -1,6 +1,5 @@
 import { clearNativeAssetCaches } from './native-cache';
 import { ResumableDownload } from './resumable-download';
-import { configureSharedStorage } from './shared-storage';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
 import { ExternalGame } from './external-game';
@@ -100,7 +99,12 @@ function retry(label: string, action: () => Promise<void>) {
 }
 async function release(): Promise<Release> {
   const result = await readUpdateFeed(feed, 12000);
-  if (!valid(result)) throw new Error('Invalid game release metadata');
+  if (!valid(result)) {
+    const features = result && typeof result === 'object' ? (result as { features?: unknown }).features : undefined;
+    if (Array.isArray(features) && !features.includes('external-game-v1'))
+      throw new Error('The published game download is outdated. A compatible game release must be published before installation can continue.');
+    throw new Error('The published game download information is invalid. Please try again later.');
+  }
   return result;
 }
 async function restoreInstalledGame(): Promise<boolean> {
@@ -115,16 +119,35 @@ async function restoreInstalledGame(): Promise<boolean> {
   }
   return true;
 }
+let storageRequestAttempted = false;
+let waitingForStorage = false;
+async function ensureStorageAccess(): Promise<boolean> {
+  let access = await SharedStorage.status();
+  if (!access.granted) {
+    waitingForStorage = true;
+    button.hidden = true;
+    if (!storageRequestAttempted) {
+      storageRequestAttempted = true;
+      status.textContent = 'Allow PokéVoid folder access in Android settings, then return to the app.';
+      try { await SharedStorage.requestAccess(); }
+      catch (error) { console.warn('Android storage settings unavailable', error); }
+      access = await SharedStorage.status();
+    }
+    if (!access.granted) {
+      status.textContent = 'Folder access is required. Enable All files access for PokéVoid in Android settings; the app will continue automatically when you return.';
+      return false;
+    }
+  }
+  waitingForStorage = false;
+  button.hidden = false;
+  await SharedStorage.createFolders();
+  return true;
+}
+
 async function main() {
   button.disabled = true;
   if (!Capacitor.isNativePlatform()) { status.textContent = 'Install this Android application to download the game.'; return; }
-  const access = await SharedStorage.status();
-  if (!access.granted) {
-    status.textContent = 'Enable PokeVoid folder access below, then return to install or play.';
-    retry('Check folder access', main);
-    return;
-  }
-  await SharedStorage.createFolders();
+  if (!(await ensureStorageAccess())) return;
   await clearNativeAssetCaches();
   if (await restoreInstalledGame()) {
     localStorage.removeItem(RESUME_KEY);
@@ -133,7 +156,7 @@ async function main() {
   let latest: Release;
   try { latest = await release(); }
   catch (error) {
-    status.textContent = 'No installed game was detected. Connect to the internet to download PokéVoid.';
+    status.textContent = error instanceof Error ? error.message : 'Unable to contact the game download server. Check your connection and retry.';
     retry('Retry connection', main);
     console.warn(error); return;
   }
@@ -166,7 +189,7 @@ async function main() {
       console.error(error);
       if (promoted) { await ExternalGame.abortLaunch(); return; }
       progressArea.hidden = true;
-      status.textContent = 'Download failed. Check your connection and available storage.';
+      status.textContent = error instanceof Error ? error.message : 'Download failed. Check your connection and available storage.';
       retry('Retry download', install);
     }
   };
@@ -185,12 +208,16 @@ async function main() {
     }
   } catch (error) { console.warn('Invalid pending download marker', error); localStorage.removeItem(RESUME_KEY); }
 }
-const storageButton = document.createElement('button');
-storageButton.textContent = 'Enable PokeVoid folder';
-storageButton.style.cssText = 'display:block;margin:12px auto;padding:10px';
-storageButton.onclick = () => {
-  void configureSharedStorage().then(() => { storageButton.textContent = 'Check PokeVoid folder access'; })
-    .catch(error => { console.warn('Shared storage unavailable', error); status.textContent = 'Storage permission was not granted. Existing game data is unchanged.'; });
-};
-document.body.append(storageButton);
+async function checkStorageOnResume(): Promise<void> {
+  if (!waitingForStorage || busy) return;
+  try {
+    if ((await SharedStorage.status()).granted) await exclusive(main);
+  } catch (error) { console.warn('Storage access check failed', error); }
+}
+if (Capacitor.isNativePlatform()) {
+  void SharedStorage.addListener('accessChanged', () => { void checkStorageOnResume(); })
+    .catch(error => console.warn('Storage resume listener unavailable', error));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void checkStorageOnResume(); });
+  window.addEventListener('focus', () => { void checkStorageOnResume(); });
+}
 void exclusive(main);

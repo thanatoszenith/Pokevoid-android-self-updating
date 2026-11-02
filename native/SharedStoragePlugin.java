@@ -6,6 +6,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import androidx.activity.result.ActivityResult;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -39,18 +41,31 @@ public class SharedStoragePlugin extends Plugin {
         call.resolve(result);
     }
 
+    private JSObject accessState() {
+        JSObject state = new JSObject(); state.put("granted", allowed()); return state;
+    }
+
     @PluginMethod
     public void requestAccess(PluginCall call) {
-        if (allowed()) { call.resolve(); return; }
-        if (Build.VERSION.SDK_INT >= 30) {
+        if (allowed()) { call.resolve(accessState()); return; }
+        if (Build.VERSION.SDK_INT < 30) { call.reject("Android 11 or newer is required"); return; }
+        getActivity().runOnUiThread(() -> {
             Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                     Uri.parse("package:" + getContext().getPackageName()));
-            try { getActivity().startActivity(intent); call.resolve(); }
-            catch (Exception e) { call.reject("Cannot open Android storage permission settings", e); }
-        } else {
-            call.reject("Grant storage permission in Android app settings");
-        }
+            try { startActivityForResult(call, intent, "storageAccessReturned"); }
+            catch (android.content.ActivityNotFoundException unavailable) {
+                try { startActivityForResult(call, new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), "storageAccessReturned"); }
+                catch (Exception failure) { call.reject("Cannot open Android storage settings", failure); }
+            } catch (Exception failure) { call.reject("Cannot open Android storage settings", failure); }
+        });
     }
+
+    @ActivityCallback
+    private void storageAccessReturned(PluginCall call, ActivityResult result) {
+        if (call != null) call.resolve(accessState());
+    }
+
+    @Override protected void handleOnResume() { notifyListeners("accessChanged", accessState()); }
 
     @PluginMethod
     public void createFolders(PluginCall call) {

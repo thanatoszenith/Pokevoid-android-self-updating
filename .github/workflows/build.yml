@@ -44,6 +44,8 @@ jobs:
           node --check ../wrapper/patches/apply.mjs
           node -e 'const u=new URL(process.env.POKEVOID_UPDATE_FEED);if(u.protocol!=="https:" || u.username || u.password || u.hash)process.exit(1)'
           node -e 'const v=process.env.POKEVOID_VERSION;if(!/^\d+(?:\.\d+)*$/.test(v)||v.split(".").some(x=>!Number.isSafeInteger(Number(x))))process.exit(1)'
+      - name: Install icon test dependency
+        run: python3 -m pip install --user pillow
       - name: Run local build-script tests
         working-directory: wrapper
         run: node --test tests/*.test.mjs
@@ -122,37 +124,8 @@ jobs:
               text=text.replace('</application>', f'    {service}\n    </application>', 1)
           p.write_text(text)
           PY
-          # Replace Capacitor's generated launcher icons with the committed PokéVoid artwork.
-          python3 -m pip install --user cairosvg pillow
-          python3 - <<'PY'
-          from pathlib import Path
-          from io import BytesIO
-          from PIL import Image
-          import cairosvg
-          svg=Path('../wrapper/assets/pokevoid-launcher.svg').read_bytes()
-          resources=Path('android/app/src/main/res')
-          sizes={'mdpi':48,'hdpi':72,'xhdpi':96,'xxhdpi':144,'xxxhdpi':192}
-          # Remove default resources (including adaptive XML) so no generated
-          # Capacitor icon silently takes precedence over the custom artwork.
-          for directory in resources.glob('mipmap-*'):
-              for icon in directory.glob('ic_launcher*'):
-                  icon.unlink()
-          for density,size in sizes.items():
-              target=resources/f'mipmap-{density}'
-              target.mkdir(parents=True,exist_ok=True)
-              raster=cairosvg.svg2png(bytestring=svg,output_width=size*4,output_height=size*4)
-              image=Image.open(BytesIO(raster)).convert('RGBA')
-              image=image.resize((size,size),Image.Resampling.LANCZOS)
-              for name in ('ic_launcher.png','ic_launcher_round.png'):
-                  image.save(target/name,optimize=True)
-          manifest=Path('android/app/src/main/AndroidManifest.xml')
-          content=manifest.read_text()
-          import re
-          content=re.sub(r'android:icon="[^"]+"','android:icon="@mipmap/ic_launcher"',content,count=1)
-          content=re.sub(r'android:roundIcon="[^"]+"','android:roundIcon="@mipmap/ic_launcher_round"',content,count=1)
-          manifest.write_text(content)
-          assert (resources/'mipmap-xxxhdpi/ic_launcher.png').stat().st_size>0
-          PY
+          # Use the supplied PNG for legacy and adaptive launcher icons.
+          python3 ../wrapper/scripts/install-launcher-icon.py ../wrapper/assets/pokevoid-launcher.png android/app/src/main/res
           chmod +x android/gradlew
           # Fail before Gradle if native registration or permissions were not generated.
           grep -R -Fq 'registerPlugin(ResumableDownloadPlugin.class)' android/app/src/main/java
