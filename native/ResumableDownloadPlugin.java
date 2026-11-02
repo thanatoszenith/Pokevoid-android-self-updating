@@ -16,7 +16,6 @@ import java.util.concurrent.Executors;
 public class ResumableDownloadPlugin extends Plugin {
     private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
     private volatile ServerSocket server;
-    private volatile File verified;
 
     @PluginMethod
     public void download(PluginCall call) {
@@ -41,7 +40,6 @@ public class ResumableDownloadPlugin extends Plugin {
                     }
                     if (!partial.renameTo(complete)) throw new IOException("Cannot finalize verified ZIP");
                 }
-                verified = complete;
                 JSObject result = new JSObject();
                 result.put("bytes", complete.length());
                 result.put("url", startLocalServer(complete));
@@ -60,6 +58,12 @@ public class ResumableDownloadPlugin extends Plugin {
             if (offset > 0) c.setRequestProperty("Range", "bytes=" + offset + "-");
             int code = c.getResponseCode();
             if (!"https".equalsIgnoreCase(c.getURL().getProtocol())) throw new IOException("Redirect to non-HTTPS URL refused");
+            if (code == 416 && offset > 0) {
+                // A partial file may already be complete after an interrupted final response.
+                c.disconnect();
+                if (matches(partial, checksum)) return;
+                partial.delete(); offset = 0; continue;
+            }
             if (code != 200 && code != 206) throw new IOException("HTTP " + code);
             if (offset == 0 && code == 206) throw new IOException("Unexpected partial response without range request");
             if (offset > 0 && code == 206) {
@@ -70,6 +74,7 @@ public class ResumableDownloadPlugin extends Plugin {
             } else if (offset > 0) {
                 partial.delete(); offset = 0;
             }
+            if (offset > 0 && c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) throw new IOException("Encoded range response refused");
             long remaining = c.getContentLengthLong();
             long total = remaining >= 0 ? offset + remaining : -1;
             try (InputStream input = c.getInputStream(); FileOutputStream output = new FileOutputStream(partial, offset > 0)) {
