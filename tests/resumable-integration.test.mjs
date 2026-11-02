@@ -140,3 +140,15 @@ test('loopback server uses bounded workers instead of spawning threads for every
   assert.match(native, /catch \(RejectedExecutionException busy\)/);
   assert.doesNotMatch(native, /"pokevoid-archive-client"\)\.start\(\)/);
 });
+
+test('background downloads use an Android dataSync foreground service', () => {
+  const service = fs.readFileSync('native/DownloadForegroundService.java', 'utf8');
+  assert.match(service, /startForeground\(NOTIFICATION_ID/);
+  assert.match(service, /FOREGROUND_SERVICE_TYPE_DATA_SYNC/);
+  assert.match(service, /START_NOT_STICKY/);
+  assert.match(native, /ContextCompat\.startForegroundService/);
+  assert.match(native, /stopService\(new Intent\(getContext\(\), DownloadForegroundService\.class\)\)/);
+  assert.match(workflow, /FOREGROUND_SERVICE_DATA_SYNC/);
+  assert.match(workflow, /foregroundServiceType="dataSync"/);
+  assert.match(workflow, /DownloadForegroundService\.java/);
+});
