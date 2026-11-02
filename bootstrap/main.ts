@@ -144,7 +144,7 @@ async function main() {
         bundle = await CapacitorUpdater.download({url: archive.url, version:latest.version, checksum:latest.checksum});
         await ResumableDownload.releaseArchive({ checksum: latest.checksum }).catch(error => console.warn('Archive cleanup deferred', error));
       } finally {
-        await progressListener.remove();
+        await progressListener.remove().catch(error => console.warn('Progress listener cleanup failed', error));
       }
       showProgress(100);
       status.textContent = 'Installing game…';
