@@ -109,7 +109,7 @@ jobs:
           else:
               text=text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
           # Android 14+ requires explicit dataSync service type and permissions.
-          for permission in ('android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_DATA_SYNC'):
+          for permission in ('android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_DATA_SYNC', 'android.permission.WAKE_LOCK'):
               if f'android:name="{permission}"' not in text:
                   text=text.replace('<application', f'<uses-permission android:name="{permission}" />\n    <application', 1)
           # Root-level shared storage requires explicit Android special app access.
