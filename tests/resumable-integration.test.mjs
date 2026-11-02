@@ -114,3 +114,15 @@ test('both download interfaces report measured speed, percent, remaining bytes a
   assert.match(gate, /remaining \/ speed/);
   assert.match(gate, /report\(downloaded, total\)/);
 });
+
+test('native progress reports resume offsets and verified cached archives immediately', () => {
+  assert.match(native, /sendProgress\(offset, -1\)/);
+  assert.match(native, /sendProgress\(done, total\)/);
+  assert.match(native, /if \(verifiedComplete\) sendProgress\(complete\.length\(\), complete\.length\(\)\)/);
+});
+
+test('cached ZIP verification is reused rather than hashing the same large archive twice', () => {
+  assert.match(native, /boolean verifiedComplete = complete\.exists\(\) && matches\(complete, key\)/);
+  assert.match(native, /if \(!verifiedComplete\)/);
+  assert.doesNotMatch(native, /if \(!complete\.exists\(\) \|\| !matches\(complete, key\)\)/);
+});
