@@ -24,10 +24,13 @@ export async function initializeDirectSaves(): Promise<void> {
       throw new Error('Invalid external save snapshot');
     saves.set(entry.key, entry.value);
   }
-  const legacy: Entry[] = [];
+  const legacy: (Entry & { sourceKey: string })[] = [];
   for (let i = 0; i < lengthGetter.call(localStorage); i++) {
     const key = keyAt.call(localStorage, i);
-    if (key && isGameSaveKey(key)) legacy.push({ key, value: get.call(localStorage, key)! });
+    if (key && isGameSaveKey(key)) legacy.push({ key, sourceKey: key, value: get.call(localStorage, key)! });
+    else if (key?.startsWith('pokevoid_pre_external_') && isGameSaveKey(key.slice('pokevoid_pre_external_'.length))) {
+      legacy.push({ key: 'data_backup_pre_external_' + key.slice('pokevoid_pre_external_'.length), sourceKey: key, value: get.call(localStorage, key)! });
+    }
   }
   // External records win. Migrate all missing records successfully before removing legacy keys.
   for (const entry of legacy) {
@@ -37,7 +40,7 @@ export async function initializeDirectSaves(): Promise<void> {
       if (!saves.has(recovery.key)) { await Native.writeSave(recovery); saves.set(recovery.key, recovery.value); }
     }
   }
-  for (const entry of legacy) remove.call(localStorage, entry.key);
+  for (const entry of legacy) remove.call(localStorage, entry.sourceKey);
   const persist = (error: string) => { if (error) throw new DOMException(error, 'QuotaExceededError'); };
   const keys = () => {
     const result: string[] = [];

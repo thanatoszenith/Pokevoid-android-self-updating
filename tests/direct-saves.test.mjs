@@ -60,3 +60,9 @@ test('remove and clear persist external deletion; session storage is independent
   x.sessionStorage.setItem('data_slot','session');x.sessionStorage.clear();assert.equal(x.disk.size,1);
   x.localStorage.clear();assert.equal(x.disk.size,0);assert.equal(x.localStorage.length,0);
 });
+
+test('legacy internal recovery copies migrate externally before being removed',async()=>{
+  const x=await fixture({legacy:{pokevoid_pre_external_data_slot:'recover'}});
+  assert.equal(x.disk.get('data_backup_pre_external_data_slot'),'recover');
+  assert.equal(x.localStorage.items.has('pokevoid_pre_external_data_slot'),false);
+});

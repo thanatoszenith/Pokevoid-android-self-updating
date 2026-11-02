@@ -61,7 +61,8 @@ excluded.
 The Android workflow fetches the pinned upstream source, applies these patches,
 builds and verifies the game ZIP, replaces web assets with the minimal bootstrap,
 removes CapacitorUpdater, registers the native plugins and builds a debug APK.
-It checks that no game content slipped into that APK.
+It checks that no game content slipped into that APK and uploads both the APK and
+the matching external game ZIP as separate build artifacts.
 
 The game publication workflow builds an immutable versioned ZIP and then publishes
 the GitHub Pages feed. New feeds must declare `external-game-v1` along with both
