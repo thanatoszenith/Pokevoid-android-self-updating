@@ -87,9 +87,16 @@ public class ResumableDownloadPlugin extends Plugin {
             }
             if (code != 200 && code != 206) throw new IOException("HTTP " + code);
             if (offset == 0 && code == 206) throw new IOException("Unexpected partial response without range request");
+            long declaredTotal = -1;
             if (offset > 0 && code == 206) {
                 String range = c.getHeaderField("Content-Range");
                 if (range == null || !range.matches("bytes " + offset + "-[0-9]+/[0-9]+")) {
+                    c.disconnect(); partial.delete(); offset = 0; continue;
+                }
+                String[] bounds = range.substring(6).split("[-/]");
+                long end = Long.parseLong(bounds[1]);
+                declaredTotal = Long.parseLong(bounds[2]);
+                if (end < offset || declaredTotal <= end) {
                     c.disconnect(); partial.delete(); offset = 0; continue;
                 }
             } else if (offset > 0) {
@@ -97,7 +104,8 @@ public class ResumableDownloadPlugin extends Plugin {
             }
             if (offset > 0 && c.getContentEncoding() != null && !"identity".equalsIgnoreCase(c.getContentEncoding())) throw new IOException("Encoded range response refused");
             long remaining = c.getContentLengthLong();
-            long total = remaining >= 0 ? offset + remaining : -1;
+            if (declaredTotal >= 0 && remaining >= 0 && remaining != declaredTotal - offset) throw new IOException("Inconsistent Content-Range and Content-Length");
+            long total = declaredTotal >= 0 ? declaredTotal : remaining >= 0 ? offset + remaining : -1;
             try (InputStream input = c.getInputStream(); FileOutputStream output = new FileOutputStream(partial, offset > 0)) {
                 byte[] buf = new byte[65536]; int n; long done = offset; long lastEvent = 0;
                 while ((n = input.read(buf)) != -1) {
