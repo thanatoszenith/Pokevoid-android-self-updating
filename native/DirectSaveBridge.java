@@ -33,7 +33,9 @@ public final class DirectSaveBridge {
                 temp = File.createTempFile(".pokevoid-", ".tmp", dir);
                 JSONObject record = new JSONObject(); record.put("key", key); record.put("value", value);
                 try (FileOutputStream out = new FileOutputStream(temp)) {
-                    out.write(record.toString().getBytes(StandardCharsets.UTF_8)); out.getFD().sync();
+                    byte[] data = record.toString().getBytes(StandardCharsets.UTF_8);
+                    if (data.length > 32 * 1024 * 1024) throw new IOException("Encoded save exceeds limit");
+                    out.write(data); out.getFD().sync();
                 }
                 if (!temp.renameTo(dest)) throw new IOException("Cannot publish external save");
             }

@@ -124,6 +124,7 @@ public class SharedStoragePlugin extends Plugin {
                 record.put("key", key);
                 record.put("value", value);
                 byte[] data = record.toString().getBytes(StandardCharsets.UTF_8);
+                if (data.length > 32 * 1024 * 1024) throw new IOException("Encoded save exceeds limit");
                 try (FileOutputStream out = new FileOutputStream(temp)) {
                     out.write(data);
                     out.getFD().sync();

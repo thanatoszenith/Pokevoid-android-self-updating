@@ -144,6 +144,7 @@ async function main() {
   }
   status.textContent = `Download PokéVoid ${latest.version}? The game is not included in the APK.`;
   const install = async () => {
+    let promoted = false;
     try {
       localStorage.setItem(RESUME_KEY, JSON.stringify({ version: latest.version, checksum: latest.checksum }));
       status.textContent = 'Downloading game… Keep this app open.';
@@ -162,11 +163,13 @@ async function main() {
       if (lastTotal > 0) showProgress(lastTotal, lastTotal);
       status.textContent = 'Installing game…';
       await ExternalGame.activate({ checksum: latest.checksum });
+      promoted = true;
       await ExternalGame.open();
       localStorage.removeItem(RESUME_KEY);
       status.textContent = 'Activation requested. If the game does not open, restart the app.';
     } catch (error) {
       console.error(error);
+      if (promoted) { await ExternalGame.abortLaunch(); return; }
       progressArea.hidden = true;
       status.textContent = 'Download failed. Check your connection and available storage.';
       retry('Retry download', install);
@@ -189,4 +192,4 @@ storageButton.onclick = () => {
     .catch(error => { console.warn('Shared storage unavailable', error); status.textContent = 'Storage permission was not granted. Existing game data is unchanged.'; });
 };
 document.body.append(storageButton);
-void main();
+void exclusive(main);

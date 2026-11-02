@@ -17,12 +17,13 @@ test('WebView uses external HTTPS file hosting, a launch watchdog and scoped con
   const source = fs.readFileSync('native/ExternalGamePlugin.java','utf8');
   for (const marker of ['setServerBasePath(base)', 'setServerAssetPath("public")', 'WebSettings.LOAD_NO_CACHE', '180000', 'launchId.equals', 'storage().recover()', 'storage().confirm()']) assert.ok(source.includes(marker), marker);
   const ready = fs.readFileSync('patches/native-launch.ts','utf8');
-  assert.ok(ready.includes("battle.events.once('create'"));
+  assert.ok(ready.includes("game.events.once('pokevoid-native-ready'"));
+  assert.ok(fs.readFileSync('patches/apply.mjs','utf8').includes('signalTitleComposed(): void {'));
 });
 test('build copies every native class and does not install the private updater', () => {
   const workflow = fs.readFileSync('.github/workflows/build.yml','utf8');
   assert.ok(workflow.includes('../wrapper/native/*.java'));
-  assert.ok(workflow.includes('pnpm remove @capgo/capacitor-updater'));
+  assert.ok(workflow.includes("! grep -Rq 'capacitor-updater'"));
   assert.ok(workflow.includes('registerPlugin(ExternalGamePlugin.class)'));
   assert.doesNotMatch(workflow, /permission+'\\\\n/);
 });

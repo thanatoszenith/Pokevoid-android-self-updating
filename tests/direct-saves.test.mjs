@@ -34,6 +34,7 @@ async function fixture({entries = [], legacy = {}, fail = false} = {}) {
 test('external saves win migration and game writes leave no internal disk copy',async()=>{
   const x=await fixture({entries:[{key:'data_slot',value:'external'}],legacy:{data_slot:'old',sessionData_1:'legacy',preference:'keep'}});
   assert.equal(x.localStorage.getItem('data_slot'),'external');
+  assert.equal(x.localStorage.hasOwnProperty('data_slot'),true);
   assert.equal(x.disk.get('sessionData_1'),'legacy');
   assert.equal(x.localStorage.items.has('data_slot'),false);
   assert.equal(x.localStorage.items.has('sessionData_1'),false);

@@ -44,6 +44,11 @@ export async function initializeDirectSaves(): Promise<void> {
     for (let i = 0; i < lengthGetter.call(localStorage); i++) result.push(keyAt.call(localStorage, i)!);
     return [...new Set([...result, ...saves.keys()])];
   };
+  const hasOwn = Object.prototype.hasOwnProperty;
+  proto.hasOwnProperty = function(key: PropertyKey): boolean {
+    return this === localStorage && typeof key === 'string' && isGameSaveKey(key)
+      ? saves.has(key) : hasOwn.call(this, key);
+  };
   proto.getItem = function(key: string): string | null {
     key = String(key);
     return this === localStorage && isGameSaveKey(key) ? saves.get(key) ?? null : get.call(this, key);

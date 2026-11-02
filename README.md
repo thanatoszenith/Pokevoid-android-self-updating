@@ -21,8 +21,8 @@ The archive is removed after extraction. A completed archive can be reused after
 interrupted download.
 
 Activation writes a journal before renaming `current` to `.previous` and staging
-to `current`. Every startup recovers unfinished transactions. The battle scene's
-create event confirms a launch using the native launch ID; an HTML load alone does
+to `current`. Every startup recovers unfinished transactions. The deferred title-screen
+composition signal confirms a launch using the native launch ID; an HTML load alone does
 not count. Confirmation commits the journal before removing the previous directory.
 A failed WebView load or a three-minute foreground launch timeout restores the old
 game and returns to the bootstrap. A process killed before confirmation rolls back

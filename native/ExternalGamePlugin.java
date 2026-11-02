@@ -36,6 +36,21 @@ public class ExternalGamePlugin extends Plugin {
             getBridge().getWebView().addJavascriptInterface(new DirectSaveBridge(), "PokeVoidSaves");
             getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                    if (launched && "localhost".equals(request.getUrl().getHost())) {
+                        try {
+                            String path = request.getUrl().getPath();
+                            File base = storage().current().getCanonicalFile();
+                            File target = new File(base, path.startsWith("/") ? path.substring(1) : path).getCanonicalFile();
+                            if (path.startsWith("/_capacitor_file_") || path.startsWith("/_capacitor_content_")
+                                || !(target.equals(base) || target.getPath().startsWith(base.getPath() + File.separator)))
+                                throw new IOException("Path outside game directory");
+                        } catch (Exception e) {
+                            return new WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden", java.util.Collections.emptyMap(), new ByteArrayInputStream(new byte[0]));
+                        }
+                    }
+                    return super.shouldInterceptRequest(view, request);
+                }
                 @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                     super.onReceivedError(view, request, error);
                     if (launched && request.isForMainFrame()) rollback();
@@ -91,6 +106,17 @@ public class ExternalGamePlugin extends Plugin {
                 if (waiting) ui.postDelayed(timeout, 180000);
             });
             call.resolve();
+        });
+    }
+    @PluginMethod public void abortLaunch(PluginCall call) {
+        launched = false; waiting = false; ui.removeCallbacks(timeout);
+        ui.post(() -> {
+            getBridge().getWebView().stopLoading();
+            execute(call, () -> {
+                storage().recover();
+                ui.post(() -> { getBridge().getWebView().clearCache(true); getBridge().setServerAssetPath("public"); });
+                call.resolve();
+            });
         });
     }
     @PluginMethod public void confirmLaunch(PluginCall call) {

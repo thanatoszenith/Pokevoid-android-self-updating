@@ -6,5 +6,6 @@ export const ExternalGame = registerPlugin<{
   stage(options: { checksum: string; version: string }): Promise<void>;
   activate(options: { checksum: string }): Promise<void>;
   open(): Promise<void>;
+  abortLaunch(): Promise<void>;
   confirmLaunch(options: { launchId: string }): Promise<void>;
 }>('ExternalGame');

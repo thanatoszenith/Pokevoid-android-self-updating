@@ -155,6 +155,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (code != 200 && code != 206) throw new IOException("HTTP " + code);
                 if (offset == 0 && code == 206) throw new IOException("Unexpected partial response");
                 long total = c.getContentLengthLong();
+                if (total > DownloadCache.MAX_BYTES) throw new IOException("Archive exceeds download limit");
                 long responseEnd = -1;
                 if (offset > 0 && code == 206) {
                     String range = c.getHeaderField("Content-Range");

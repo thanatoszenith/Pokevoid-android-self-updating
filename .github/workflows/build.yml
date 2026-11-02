@@ -77,9 +77,9 @@ jobs:
           # The game build must not remain in dist when Capacitor copies web assets.
           test -s dist/index.html
           node ../wrapper/scripts/verify-bootstrap.mjs dist
-          pnpm remove @capgo/capacitor-updater
           npx cap add android
           npx cap sync android
+          ! grep -Rq 'capacitor-updater' android/capacitor.settings.gradle android/app/capacitor.build.gradle
           # Register the native resumable downloader in the generated Capacitor activity.
           mkdir -p android/app/src/main/java/com/zenni/pokevoid
           cp ../wrapper/native/*.java android/app/src/main/java/com/zenni/pokevoid/

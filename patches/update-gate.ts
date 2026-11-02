@@ -75,6 +75,7 @@ export async function updateBeforeGame(): Promise<boolean> {
   } catch { localStorage.removeItem(RESUME_KEY); }
   if (!resume && !window.confirm(`PokéVoid ${release.version} is available. Download and install before playing?`)) return true;
   const overlay = showOverlay();
+  let promoted = false;
   try {
     localStorage.setItem(RESUME_KEY, JSON.stringify({ version: release.version, checksum: release.checksum }));
     overlay.message('Downloading update… Gameplay is paused.');
@@ -115,12 +116,14 @@ export async function updateBeforeGame(): Promise<boolean> {
     } finally { await listener.remove().catch(error => console.warn('[UpdateGate] Progress listener cleanup failed', error)); }
     overlay.message('Installing update…');
     await ExternalGame.activate({ checksum: release.checksum });
+    promoted = true;
     await ExternalGame.open();
     localStorage.removeItem(RESUME_KEY); // External file host reloads the WebView.
     // Never boot the old document while a bundle switch is underway.
     return false;
   } catch (error) {
     console.error('[UpdateGate] Update failed', error);
+    if (promoted) { await ExternalGame.abortLaunch(); return false; }
     // Keep the pending marker for automatic recovery on the next app launch.
     overlay.message('Update failed. You can still play the installed version.');
     window.alert('Update failed. The installed version will start.');
