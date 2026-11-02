@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 
 const feed = '__POKEVOID_UPDATE_FEED__';
+const RESUME_KEY = 'pokevoid_pending_bootstrap_download';
 const status = document.getElementById('status')!;
 const button = document.getElementById('install') as HTMLButtonElement;
 const progressArea = document.getElementById('progress-area') as HTMLDivElement;
@@ -156,6 +157,7 @@ async function main() {
   status.textContent = `Download PokéVoid ${latest.version}? The game is not included in the APK.`;
   const install = async () => {
     try {
+      localStorage.setItem(RESUME_KEY, JSON.stringify({ version: latest.version, checksum: latest.checksum }));
       status.textContent = 'Downloading game… Keep this app open.';
       resetProgress();
       const ready = await findReadyBundle(latest.version, latest.checksum).catch(error => { console.warn('Bundle recovery lookup failed', error); return undefined; });
@@ -178,6 +180,7 @@ async function main() {
       }
       if (lastTotal > 0) showProgress(lastTotal, lastTotal);
       status.textContent = 'Installing game…';
+      localStorage.removeItem(RESUME_KEY);
       await CapacitorUpdater.set(bundle);
       status.textContent = 'Activation requested. If the game does not open, restart the app.';
     } catch (error) {
@@ -188,6 +191,13 @@ async function main() {
     }
   };
   retry('Download game', install);
+  try {
+    const pending = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null');
+    if (pending?.version === latest.version && pending?.checksum === latest.checksum) {
+      status.textContent = 'Resuming interrupted game download…';
+      void exclusive(install);
+    }
+  } catch { localStorage.removeItem(RESUME_KEY); }
 }
 const storageButton = document.createElement('button');
 storageButton.textContent = 'Enable PokeVoid folder';
