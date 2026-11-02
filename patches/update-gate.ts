@@ -111,16 +111,41 @@ export async function updateBeforeGame(): Promise<boolean> {
   const overlay = showOverlay();
   try {
     overlay.message('Downloading update… Gameplay is paused.');
-    const mb = (n: number) => (n / 1048576).toFixed(1) + ' MB';
+    const mb = (n: number) => (n / 1048576).toFixed(1) + ' MiB';
+    let sampleTime = 0;
+    let sampleBytes = 0;
+    let speed = 0;
+    const duration = (seconds: number) => {
+      const n = Math.max(0, Math.ceil(seconds));
+      return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.floor(n % 3600 / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
+    };
+    const report = (downloaded: number, total: number) => {
+      if (!Number.isFinite(downloaded) || downloaded < 0) return;
+      const now = Date.now();
+      if (sampleTime && downloaded < sampleBytes) { sampleTime = 0; speed = 0; }
+      if (sampleTime && now - sampleTime >= 800) {
+        const delta = downloaded - sampleBytes;
+        const instant = delta > 0 ? delta * 1000 / (now - sampleTime) : 0;
+        speed = speed > 0 ? speed * 0.7 + instant * 0.3 : instant;
+        sampleTime = now;
+        sampleBytes = downloaded;
+      } else if (!sampleTime) { sampleTime = now; sampleBytes = downloaded; }
+      if (Number.isFinite(total) && total > 0) {
+        const remaining = Math.max(0, total - downloaded);
+        const percent = Math.min(100, Math.max(0, 100 * downloaded / total));
+        const eta = remaining === 0 ? 'Verifying…' : speed > 1024 ? `ETA ${duration(remaining / speed)}` : 'ETA calculating…';
+        overlay.message(`Downloading update: ${percent.toFixed(1)}% • ${mb(downloaded)} / ${mb(total)} • ${mb(remaining)} left • ${speed > 1024 ? mb(speed) + '/s' : 'Speed calculating…'} • ${eta}`);
+      } else {
+        overlay.message(`Downloading update: ${mb(downloaded)} received • Total unknown • ${speed > 1024 ? mb(speed) + '/s' : 'Speed calculating…'}`);
+      }
+    };
     const ready = await findReadyBundle(release.version, release.checksum).catch(error => { console.warn('[UpdateGate] Recovery lookup unavailable', error); return undefined; });
     if (ready) {
       overlay.message('Activating previously downloaded update…');
       await CapacitorUpdater.set(ready);
       return false;
     }
-    const listener = await ResumableDownload.addListener('progress', ({ downloaded, total }) => {
-      overlay.message(total > 0 ? `Downloading update: ${mb(downloaded)} received • ${mb(Math.max(0,total-downloaded))} remaining` : `Downloading update: ${mb(downloaded)} received`);
-    });
+    const listener = await ResumableDownload.addListener('progress', ({ downloaded, total }) => report(downloaded, total));
     let bundle;
     try {
       const archive = await ResumableDownload.download({ url: release.url, checksum: release.checksum });
