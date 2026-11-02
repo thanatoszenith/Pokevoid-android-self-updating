@@ -210,3 +210,11 @@ test('resumable response validates offsets without requiring an entire suffix', 
   assert.doesNotMatch(native, /end != declaredTotal - 1/);
   assert.match(native, /if \(total >= 0 && done != total\)/);
 });
+
+test('foreground notification shows byte progress even when WebView is backgrounded', () => {
+  const service = fs.readFileSync('native/DownloadForegroundService.java', 'utf8');
+  assert.match(service, /static void updateProgress\(Context context, long downloaded, long total\)/);
+  assert.match(service, /setProgress\(100, percent, false\)/);
+  assert.match(service, /manager\.notify\(NOTIFICATION_ID/);
+  assert.match(native, /DownloadForegroundService\.updateProgress\(getContext\(\), downloaded, total\)/);
+});
