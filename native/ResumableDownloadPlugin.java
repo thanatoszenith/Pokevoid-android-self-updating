@@ -167,7 +167,9 @@ public class ResumableDownloadPlugin extends Plugin {
                 String request = reader.readLine();
                 if (request == null || !(request.startsWith("GET /" + token + "/bundle.zip ") || request.startsWith("HEAD /" + token + "/bundle.zip "))) return;
                 String line, range = null;
+                int headerCount = 0;
                 while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                    if (++headerCount > 64 || line.length() > 8192) return;
                     if (line.toLowerCase(Locale.ROOT).startsWith("range:")) range = line.substring(6).trim();
                 }
                 long start = 0, end = file.length() - 1;
@@ -176,7 +178,12 @@ public class ResumableDownloadPlugin extends Plugin {
                     start = Long.parseLong(pieces[0]);
                     if (pieces.length > 1 && !pieces[1].isEmpty()) end = Math.min(end, Long.parseLong(pieces[1]));
                 }
-                if (start > end) return;
+                if (range != null && !range.matches("bytes=\\\\d+-\\\\d*")) return;
+                if (start > end || start >= file.length()) {
+                    OutputStream out = s.getOutputStream();
+                    out.write(("HTTP/1.1 416 Range Not Satisfiable\\r\\nContent-Range: bytes */" + file.length() + "\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n").getBytes(StandardCharsets.US_ASCII));
+                    out.flush(); return;
+                }
                 boolean partial = start > 0 || end < file.length() - 1;
                 OutputStream out = s.getOutputStream();
                 String headers = "HTTP/1.1 " + (partial ? "206 Partial Content" : "200 OK") + "\r\nContent-Type: application/zip\r\nAccept-Ranges: bytes\r\nContent-Length: " + (end-start+1) + "\r\n" + (partial ? "Content-Range: bytes " + start + "-" + end + "/" + file.length() + "\r\n" : "") + "Connection: close\r\n\r\n";
