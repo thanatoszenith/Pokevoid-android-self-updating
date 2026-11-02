@@ -181,3 +181,19 @@ test('root-level PokeVoid storage is explicitly permission-gated and preserves w
   assert.match(bridge, /configureSharedStorage/);
   assert.match(apply, /patches\/shared-storage\.ts/);
 });
+
+test('direct external saves migrate before game boot and persist writes atomically', () => {
+  const direct = fs.readFileSync('patches/direct-saves.ts', 'utf8');
+  const shared = fs.readFileSync('native/SharedStoragePlugin.java', 'utf8');
+  assert.match(patcher, /await initializeDirectSaves\(\)/);
+  assert.match(patcher, /patches\/direct-saves\.ts/);
+  assert.match(direct, /await Native\.readSaves\(\)/);
+  assert.match(direct, /if \(!external\.has\(entry\.key\)\) await Native\.writeSave\(entry\)/);
+  assert.match(direct, /Storage\.prototype\.setItem/);
+  assert.match(direct, /Storage\.prototype\.removeItem/);
+  assert.match(direct, /pokevoid_pre_external_/);
+  assert.match(shared, /File\.createTempFile/);
+  assert.match(shared, /out\.getFD\(\)\.sync\(\)/);
+  assert.match(shared, /readSaves\(PluginCall call\)/);
+  assert.match(shared, /deleteSave\(PluginCall call\)/);
+});
