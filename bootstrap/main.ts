@@ -120,7 +120,7 @@ async function main() {
     console.warn(error); return;
   }
   status.textContent = `Download PokéVoid ${latest.version}? The game is not included in the APK.`;
-  retry('Download game', async () => {
+  const install = async () => {
     try {
       status.textContent = 'Downloading game… Keep this app open.';
       downloadStarted = Date.now();
@@ -154,8 +154,9 @@ async function main() {
       console.error(error);
       progressArea.hidden = true;
       status.textContent = 'Download failed. Check your connection and available storage.';
-      retry('Retry download', async () => { await main(); });
+      retry('Retry download', install);
     }
-  });
+  };
+  retry('Download game', install);
 }
 void main();
