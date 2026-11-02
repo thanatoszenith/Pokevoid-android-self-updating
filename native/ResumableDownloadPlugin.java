@@ -135,9 +135,9 @@ public class ResumableDownloadPlugin extends Plugin {
         for (int attempt = 0; attempt < 5; attempt++) {
             HttpURLConnection c = null;
             try {
+                // openVerifiedConnection already connected and applied these headers
+                // to every redirect hop. Mutating request headers now throws IllegalStateException.
                 c = openVerifiedConnection(url, offset);
-                c.setRequestProperty("Accept-Encoding", "identity");
-                if (offset > 0) c.setRequestProperty("Range", "bytes=" + offset + "-");
                 int code = c.getResponseCode();
 
                 if (code == 416 && offset > 0) {
