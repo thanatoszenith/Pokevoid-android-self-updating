@@ -59,7 +59,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     if (!partial.renameTo(complete)) throw new IOException("Cannot finalize verified ZIP");
                 }
                 try { SharedStoragePlugin.mirrorArchive(complete, key); }
-                catch (IOException error) { android.util.Log.w("PokeVoid", "Shared archive backup deferred", error); }
+                catch (IOException | SecurityException error) { android.util.Log.w("PokeVoid", "Shared archive backup deferred", error); }
                 JSObject result = new JSObject();
                 result.put("bytes", complete.length());
                 result.put("url", startLocalServer(complete, key));
@@ -199,6 +199,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     // A server may send a valid bounded range instead of the entire remaining suffix.
                     // Request the next range rather than treating a valid segment as a failure.
                     offset = done;
+                    // Bounded partial responses are progress, not failed attempts.
                     attempt--;
                     continue;
                 }
