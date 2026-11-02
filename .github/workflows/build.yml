@@ -122,10 +122,8 @@ jobs:
         run: |
           test -s game/android/app/build/outputs/apk/debug/app-debug.apk
           node wrapper/scripts/verify-apk.mjs game/android/app/build/outputs/apk/debug/app-debug.apk
-          # Ensure native downloader code is actually packaged, not just present in sources.
-          if command -v dexdump >/dev/null 2>&1; then
-            unzip -p game/android/app/build/outputs/apk/debug/app-debug.apk classes.dex | dexdump -d /dev/stdin | grep -q 'ResumableDownloadPlugin'
-          fi
+          # Verify the compiled DEX contains the native plugin class.
+          unzip -p game/android/app/build/outputs/apk/debug/app-debug.apk classes.dex | strings | grep -Fq 'ResumableDownloadPlugin'
           test -s "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-daily-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
