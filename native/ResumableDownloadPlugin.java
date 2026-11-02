@@ -151,6 +151,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (code != 200 && code != 206) throw new IOException("HTTP " + code);
                 if (offset == 0 && code == 206) throw new IOException("Unexpected partial response");
                 long total = c.getContentLengthLong();
+                long responseEnd = -1;
                 if (offset > 0 && code == 206) {
                     String range = c.getHeaderField("Content-Range");
                     if (range == null || !range.matches("bytes " + offset + "-[0-9]+/[0-9]+")) {
@@ -163,6 +164,7 @@ public class ResumableDownloadPlugin extends Plugin {
                         throw new IOException("Incomplete or invalid resumed range");
                     }
                     if (total >= 0 && total != end - offset + 1) throw new IOException("Inconsistent Content-Range and Content-Length");
+                    responseEnd = end;
                     total = declaredTotal;
                 } else if (offset > 0) {
                     // The server ignored Range: restart from byte zero.
@@ -192,7 +194,14 @@ public class ResumableDownloadPlugin extends Plugin {
                 }
                 offset = done;
                 sendProgress(done, total);
-                if (total >= 0 && done != total) throw new IOException("Incomplete HTTP response");
+                if (responseEnd >= 0 && done != responseEnd + 1) throw new IOException("Incomplete resumed range response");
+                if (total >= 0 && done != total) {
+                    // A server may send a valid bounded range instead of the entire remaining suffix.
+                    // Request the next range rather than treating a valid segment as a failure.
+                    offset = done;
+                    attempt--;
+                    continue;
+                }
                 return;
             } catch (IOException error) {
                 lastFailure = error;
