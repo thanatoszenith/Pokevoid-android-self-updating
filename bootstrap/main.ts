@@ -1,3 +1,4 @@
+import { ResumableDownload } from './resumable-download';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
@@ -140,12 +141,15 @@ async function main() {
         await CapacitorUpdater.set(ready);
         return;
       }
-      const progressListener = await CapacitorUpdater.addListener('download', (event: {percent?: number}) => {
-        showProgress(event.percent);
+      const progressListener = await ResumableDownload.addListener('progress', event => {
+        if (event.total > 0) { totalBytes = event.total; showProgress(100 * event.downloaded / event.total); }
+        else { progressArea.hidden = false; progressDetails.textContent = `${formatBytes(event.downloaded)} downloaded • total unknown`; }
       });
       let bundle;
       try {
-        bundle = await CapacitorUpdater.download({url: latest.url, version:latest.version, checksum:latest.checksum});
+        const archive = await ResumableDownload.download({ url: latest.url, checksum: latest.checksum });
+        status.textContent = 'Importing verified game bundle…';
+        bundle = await CapacitorUpdater.download({url: archive.url, version:latest.version, checksum:latest.checksum});
       } finally {
         await progressListener.remove();
       }
