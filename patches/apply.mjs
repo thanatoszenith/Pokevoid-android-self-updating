@@ -26,6 +26,7 @@ main = main.replace(legacyNotify, '');
 fs.writeFileSync(mainPath, main);
 fs.copyFileSync('patches/update-gate.ts', 'src/update-gate.ts');
 fs.copyFileSync('patches/resumable-download.ts', 'src/resumable-download.ts');
+fs.copyFileSync('patches/shared-storage.ts', 'src/shared-storage.ts');
 fs.copyFileSync('patches/read-update-feed.ts', 'src/read-update-feed.ts');
 let gate = fs.readFileSync('src/update-gate.ts', 'utf8');
 gate = gate.replace("'__POKEVOID_UPDATE_FEED__'", JSON.stringify(feed)).replace("'__POKEVOID_VERSION__'", JSON.stringify(version));
