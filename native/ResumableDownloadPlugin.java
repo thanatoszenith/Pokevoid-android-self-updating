@@ -159,7 +159,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     String[] bounds = range.substring(6).split("[-/]");
                     long end = Long.parseLong(bounds[1]);
                     long declaredTotal = Long.parseLong(bounds[2]);
-                    if (end < offset || declaredTotal <= end || end != declaredTotal - 1) {
+                    if (end < offset || declaredTotal <= end) {
                         throw new IOException("Incomplete or invalid resumed range");
                     }
                     if (total >= 0 && total != end - offset + 1) throw new IOException("Inconsistent Content-Range and Content-Length");
@@ -252,8 +252,8 @@ public class ResumableDownloadPlugin extends Plugin {
         for (int i = 0; i <= 8192; i++) {
             int c = reader.read();
             if (c == -1) return line.length() == 0 ? null : line.toString();
-            if (c == '\\n') return line.toString();
-            if (c != '\\r') line.append((char) c);
+            if (c == '\n') return line.toString();
+            if (c != '\r') line.append((char) c);
         }
         throw new IOException("HTTP request line exceeds limit");
     }
