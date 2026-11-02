@@ -82,17 +82,20 @@ jobs:
           # Register the native resumable downloader in the generated Capacitor activity.
           mkdir -p android/app/src/main/java/com/zenni/pokevoid
           cp ../wrapper/native/ResumableDownloadPlugin.java android/app/src/main/java/com/zenni/pokevoid/
-          cat > android/app/src/main/java/com/zenni/pokevoid/MainActivity.java <<'JAVA'
-          package com.zenni.pokevoid;
-          import android.os.Bundle;
-          import com.getcapacitor.BridgeActivity;
-          public class MainActivity extends BridgeActivity {
-            @Override public void onCreate(Bundle savedInstanceState) {
-              registerPlugin(ResumableDownloadPlugin.class);
-              super.onCreate(savedInstanceState);
-            }
-          }
-          JAVA
+          # Patch the generated MainActivity in place; never add a duplicate class.
+          python3 - <<'PY'
+          from pathlib import Path
+          activities=list(Path('android/app/src/main/java').rglob('MainActivity.java'))
+          if len(activities)!=1: raise RuntimeError(f'Expected exactly one generated MainActivity, got {activities}')
+          activity=activities[0]
+          source=activity.read_text()
+          if 'registerPlugin(ResumableDownloadPlugin.class)' not in source:
+              source=source.replace('import com.getcapacitor.BridgeActivity;', 'import com.getcapacitor.BridgeActivity;\\nimport com.zenni.pokevoid.ResumableDownloadPlugin;\\nimport android.os.Bundle;')
+              marker='public class MainActivity extends BridgeActivity {'
+              if marker not in source: raise RuntimeError('Generated MainActivity layout changed')
+              source=source.replace(marker, marker+'\\n  @Override public void onCreate(Bundle savedInstanceState) {\\n    registerPlugin(ResumableDownloadPlugin.class);\\n    super.onCreate(savedInstanceState);\\n  }')
+          activity.write_text(source)
+          PY
           # Capgo imports a verified archive over a loopback-only HTTP server.
           python3 - <<'PY'
           from pathlib import Path
