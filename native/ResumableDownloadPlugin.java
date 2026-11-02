@@ -16,6 +16,7 @@ import java.util.concurrent.Executors;
 public class ResumableDownloadPlugin extends Plugin {
     private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
     private volatile ServerSocket server;
+    private volatile String serverToken;
 
     @PluginMethod
     public void download(PluginCall call) {
@@ -114,25 +115,27 @@ public class ResumableDownloadPlugin extends Plugin {
     private synchronized String startLocalServer(File file) throws IOException {
         if (server != null && !server.isClosed()) server.close();
         server = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
+        serverToken = java.util.UUID.randomUUID().toString();
+        String token = serverToken;
         ServerSocket socket = server;
         Thread thread = new Thread(() -> {
             while (!socket.isClosed()) {
                 try {
                     Socket client = socket.accept();
-                    executorForClient(client, file);
+                    executorForClient(client, file, token);
                 } catch (IOException e) { break; }
             }
         }, "pokevoid-archive-server");
         thread.setDaemon(true); thread.start();
-        return "http://127.0.0.1:" + socket.getLocalPort() + "/bundle.zip";
+        return "http://127.0.0.1:" + socket.getLocalPort() + "/" + token + "/bundle.zip";
     }
 
-    private void executorForClient(Socket client, File file) {
+    private void executorForClient(Socket client, File file, String token) {
         new Thread(() -> {
             try (Socket s = client; BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII))) {
                 s.setSoTimeout(30000);
                 String request = reader.readLine();
-                if (request == null || !(request.startsWith("GET /bundle.zip ") || request.startsWith("HEAD /bundle.zip "))) return;
+                if (request == null || !(request.startsWith("GET /" + token + "/bundle.zip ") || request.startsWith("HEAD /" + token + "/bundle.zip "))) return;
                 String line, range = null;
                 while ((line = reader.readLine()) != null && !line.isEmpty()) {
                     if (line.toLowerCase(Locale.ROOT).startsWith("range:")) range = line.substring(6).trim();
