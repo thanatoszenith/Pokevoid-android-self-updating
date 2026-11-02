@@ -199,9 +199,11 @@ public class ResumableDownloadPlugin extends Plugin {
                 }
                 long start = 0, end = file.length() - 1;
                 if (range != null && range.matches("bytes=\\d+-\\d*")) {
-                    String[] pieces = range.substring(6).split("-", 2);
-                    start = Long.parseLong(pieces[0]);
-                    if (pieces.length > 1 && !pieces[1].isEmpty()) end = Math.min(end, Long.parseLong(pieces[1]));
+                    try {
+                        String[] pieces = range.substring(6).split("-", 2);
+                        start = Long.parseLong(pieces[0]);
+                        if (pieces.length > 1 && !pieces[1].isEmpty()) end = Math.min(end, Long.parseLong(pieces[1]));
+                    } catch (NumberFormatException invalidRange) { start = file.length(); }
                 }
                 if (range != null && !range.matches("bytes=\\d+-\\d*")) return;
                 if (start > end || start >= file.length() || file.length() == 0) {
