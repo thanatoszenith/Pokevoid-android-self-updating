@@ -1,0 +1,158 @@
+name: Publish PokéVoid game bundle (no APK)
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Game bundle version, numeric dotted'
+        required: true
+        type: string
+      upstream_ref:
+        description: 'Upstream PokéVoid commit SHA to build'
+        required: false
+        type: string
+      publish:
+        description: 'Publish game ZIP and manifest to GitHub Releases'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pokevoid-game-feed
+  cancel-in-progress: false
+jobs:
+  game:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: wrapper
+      - name: Validate release destination before building
+        if: ${{ inputs.publish }}
+        env:
+          POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
+          POKEVOID_RELEASE_BASE_URL: ${{ vars.POKEVOID_RELEASE_BASE_URL || 'https://github.com/thanatoszenith/Pokevoid-android-self-updating/releases/download/game-feed/' }}
+        run: node wrapper/scripts/validate-release-config.mjs
+      - uses: actions/checkout@v4
+        with:
+          repository: smittynugget/pokevoid
+          ref: ${{ inputs.upstream_ref || '802a20fb8e75a873d9eaa79fc1f3febe7b420be7' }}
+          path: game
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9'
+      - name: Validate upstream ref
+        if: ${{ inputs.upstream_ref }}
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: |
+          [[ "$UPSTREAM_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+      - name: Validate feed and patcher
+        working-directory: game
+        env:
+          POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
+          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: |
+          test -n "$POKEVOID_UPDATE_FEED"
+          node --check ../wrapper/patches/apply.mjs
+          node -e 'const u=new URL(process.env.POKEVOID_UPDATE_FEED);if(u.protocol!=="https:" || u.username || u.password || u.hash)process.exit(1)'
+          node -e 'const v=process.env.POKEVOID_VERSION;if(!/^\d+(?:\.\d+)*$/.test(v)||v.split(".").some(x=>!Number.isSafeInteger(Number(x))))process.exit(1)'
+      - name: Run local build-script tests
+        working-directory: wrapper
+        run: node --test tests/*.test.mjs
+      - name: Build downloadable full game bundle
+        working-directory: game
+        env:
+          POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
+          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm add -D --save-exact @capacitor/cli@7 @capacitor/android@7 @capacitor/core@7 @capgo/capacitor-updater@7
+          pnpm exec cap --version
+          pnpm exec vite --version
+          cp -R ../wrapper/patches .
+          node patches/apply.mjs
+          VITE_NATIVE_WRAPPER=1 pnpm exec vite build
+          test -s dist/index.html
+          rm -rf dist/pokesave
+          cd dist && zip -qr "../../pokevoid-game-${POKEVOID_VERSION}.zip" .
+          cd .. && node ../wrapper/scripts/verify-bundle.mjs "../pokevoid-game-${POKEVOID_VERSION}.zip"
+          node ../wrapper/scripts/verify-daily-bundle.mjs "../pokevoid-game-${POKEVOID_VERSION}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokevoid-downloadable-game-bundle
+          path: pokevoid-game-*.zip
+      - name: Validate publication configuration before release
+        if: ${{ inputs.publish }}
+        env:
+          POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
+          POKEVOID_RELEASE_BASE_URL: ${{ vars.POKEVOID_RELEASE_BASE_URL || 'https://github.com/thanatoszenith/Pokevoid-android-self-updating/releases/download/game-feed/' }}
+        run: |
+          test -n "$POKEVOID_RELEASE_BASE_URL"
+          node wrapper/scripts/validate-release-config.mjs
+
+      - name: Generate release manifest
+        if: ${{ inputs.publish }}
+        env:
+          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_RELEASE_BASE_URL: ${{ vars.POKEVOID_RELEASE_BASE_URL || 'https://github.com/thanatoszenith/Pokevoid-android-self-updating/releases/download/game-feed/' }}
+          POKEVOID_UPSTREAM_COMMIT: ${{ inputs.upstream_ref || '802a20fb8e75a873d9eaa79fc1f3febe7b420be7' }}
+        run: node wrapper/scripts/create-manifest.mjs
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.publish }}
+        with:
+          name: pokevoid-release-manifest
+          path: capacitor-update.json
+
+      - name: Reject downgrade of published game feed
+        if: ${{ inputs.publish }}
+        env:
+          POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
+          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_ALLOW_FIRST_PUBLICATION: ${{ vars.POKEVOID_ALLOW_FIRST_PUBLICATION || 'true' }}
+        run: node wrapper/scripts/check-release-order.mjs
+
+      - name: Publish immutable versioned game ZIP before manifest
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: |
+          gh release view game-feed --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create game-feed --repo "$GITHUB_REPOSITORY" --title 'PokéVoid downloadable game' --notes 'Versioned game bundles.'
+          # Never replace bytes already advertised under the same version.
+          if gh release view game-feed --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "pokevoid-game-${POKEVOID_VERSION}.zip"; then
+            echo "Release bundle already exists for this version; refusing overwrite" >&2
+            exit 1
+          fi
+          gh release upload game-feed --repo "$GITHUB_REPOSITORY" "pokevoid-game-${POKEVOID_VERSION}.zip"
+
+      - name: Prepare Pages update manifest
+        if: ${{ inputs.publish }}
+        env:
+          POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
+          POKEVOID_RELEASE_BASE_URL: ${{ vars.POKEVOID_RELEASE_BASE_URL || 'https://github.com/thanatoszenith/Pokevoid-android-self-updating/releases/download/game-feed/' }}
+        run: |
+          mkdir -p pages
+          cp capacitor-update.json pages/capacitor-update.json
+          node wrapper/scripts/verify-publication.mjs pages/capacitor-update.json
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ inputs.publish }}
+        with:
+          path: pages
+
+  deploy-feed:
+    if: ${{ inputs.publish }}
+    needs: game
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish update manifest after ZIP upload
+        id: deployment
+        uses: actions/deploy-pages@v4
