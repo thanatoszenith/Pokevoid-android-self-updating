@@ -152,3 +152,15 @@ test('background downloads use an Android dataSync foreground service', () => {
   assert.match(workflow, /foregroundServiceType="dataSync"/);
   assert.match(workflow, /DownloadForegroundService\.java/);
 });
+
+test('HTTP headers are configured only before the redirect connection is established', () => {
+  assert.match(native, /c = openVerifiedConnection\(url, offset\);\s*int code = c\.getResponseCode\(\)/);
+  assert.doesNotMatch(native, /c = openVerifiedConnection\(url, offset\);\s*c\.setRequestProperty/);
+});
+
+test('loopback HTTP parser limits line lengths before buffering and cleanup tracks archive identity', () => {
+  assert.match(native, /private String readLimitedLine\(BufferedReader reader\)/);
+  assert.match(native, /reader\.read\(\)/);
+  assert.match(native, /while \(\(line = readLimitedLine\(reader\)\)/);
+  assert.match(native, /sha\.equalsIgnoreCase\(servedChecksum\)/);
+});
