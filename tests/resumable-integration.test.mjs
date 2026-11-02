@@ -258,3 +258,17 @@ test('background downloads retain CPU access with bounded renewable wake lock', 
   assert.match(service, /downloadWakeLock\.release\(\)/);
   assert.match(service, /START_NOT_STICKY/);
 });
+
+test('HTTP resume rejects truncated full responses and range overruns', () => {
+  assert.match(native, /Response exceeded declared Content-Range/);
+  assert.match(native, /Incomplete full HTTP response/);
+  assert.match(native, /Too many bounded range responses/);
+  assert.match(native, /if \(code == 416 && offset > 0\)/);
+});
+
+test('bootstrap and update gate keep recovery marker until activation returns', () => {
+  for (const source of [bootstrap, gate]) {
+    assert.match(source, /await CapacitorUpdater\.set\(bundle\);\s*localStorage\.removeItem\(RESUME_KEY\)/);
+    assert.match(source, /await CapacitorUpdater\.set\(ready\);\s*localStorage\.removeItem\(RESUME_KEY\)/);
+  }
+});
