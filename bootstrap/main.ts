@@ -146,7 +146,10 @@ async function main() {
   button.disabled = true;
   if (!Capacitor.isNativePlatform()) { status.textContent = 'Install this Android application to download the game.'; return; }
   try { await CapacitorUpdater.notifyAppReady(); } catch (error) { console.warn('Readiness failed', error); }
-  if (await restoreInstalledGame()) return;
+  if (await restoreInstalledGame()) {
+    localStorage.removeItem(RESUME_KEY);
+    return;
+  }
   let latest: Release;
   try { latest = await release(); }
   catch (error) {
@@ -164,6 +167,7 @@ async function main() {
       if (ready) {
         status.textContent = 'Restoring previously downloaded game…';
         await CapacitorUpdater.set(ready);
+        localStorage.removeItem(RESUME_KEY);
         return;
       }
       const progressListener = await ResumableDownload.addListener('progress', event => {
@@ -180,8 +184,8 @@ async function main() {
       }
       if (lastTotal > 0) showProgress(lastTotal, lastTotal);
       status.textContent = 'Installing game…';
-      localStorage.removeItem(RESUME_KEY);
       await CapacitorUpdater.set(bundle);
+      localStorage.removeItem(RESUME_KEY);
       status.textContent = 'Activation requested. If the game does not open, restart the app.';
     } catch (error) {
       console.error(error);
@@ -197,7 +201,7 @@ async function main() {
       status.textContent = 'Resuming interrupted game download…';
       void exclusive(install);
     }
-  } catch { localStorage.removeItem(RESUME_KEY); }
+  } catch (error) { console.warn('Invalid pending download marker', error); localStorage.removeItem(RESUME_KEY); }
 }
 const storageButton = document.createElement('button');
 storageButton.textContent = 'Enable PokeVoid folder';
