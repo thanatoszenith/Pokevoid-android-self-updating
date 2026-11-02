@@ -62,3 +62,13 @@ test('publication validates public ZIP before deploying the update feed', () => 
   assert.ok(zipCheck >= 0 && feedDeployment > zipCheck);
   assert.match(publish, /curl --head --fail --location/);
 });
+
+test('loopback ZIP server rejects invalid ranges and caps request headers', () => {
+  assert.match(native, /416 Range Not Satisfiable/);
+  assert.match(native, /headerCount > 64/);
+  assert.match(native, /start >= file\.length\(\)/);
+});
+
+test('bootstrap does not make redundant cross-origin HEAD requests', () => {
+  assert.doesNotMatch(bootstrap, /fetchBundleSize\(/);
+});
