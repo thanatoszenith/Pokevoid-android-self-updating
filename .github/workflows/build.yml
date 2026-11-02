@@ -169,9 +169,16 @@ jobs:
           test -s game/android/app/build/outputs/apk/debug/app-debug.apk
           node wrapper/scripts/verify-apk.mjs game/android/app/build/outputs/apk/debug/app-debug.apk
           # Verify the compiled DEX contains the native plugin class.
-          unzip -p game/android/app/build/outputs/apk/debug/app-debug.apk classes.dex > /tmp/pokevoid-classes.dex
-          strings /tmp/pokevoid-classes.dex > /tmp/pokevoid-classes-strings.txt
-          grep -Fq 'ResumableDownloadPlugin' /tmp/pokevoid-classes-strings.txt
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          apk='game/android/app/build/outputs/apk/debug/app-debug.apk'
+          with ZipFile(apk) as z:
+              dex_files=[name for name in z.namelist() if name.startswith('classes') and name.endswith('.dex')]
+              if not dex_files: raise RuntimeError('APK contains no DEX files')
+              if not any(b'ResumableDownloadPlugin' in z.read(name) for name in dex_files):
+                  raise RuntimeError(f'ResumableDownloadPlugin missing from {dex_files}')
+              print(f'Native downloader found in APK ({len(dex_files)} DEX files checked)')
+          PY
           test -s "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-daily-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
