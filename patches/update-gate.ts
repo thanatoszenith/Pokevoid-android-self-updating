@@ -127,7 +127,7 @@ export async function updateBeforeGame(): Promise<boolean> {
       overlay.message('Importing verified update…');
       bundle = await CapacitorUpdater.download({ url: archive.url, version: release.version, checksum: release.checksum });
       await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
-    } finally { await listener.remove(); }
+    } finally { await listener.remove().catch(error => console.warn('[UpdateGate] Progress listener cleanup failed', error)); }
     overlay.message('Installing update…');
     await CapacitorUpdater.set(bundle); // Capgo switches/reloads the web bundle.
     // Never boot the old document while a bundle switch is underway.
