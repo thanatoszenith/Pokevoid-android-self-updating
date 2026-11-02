@@ -90,6 +90,7 @@ jobs:
           activity=activities[0]
           source=activity.read_text()
           if 'registerPlugin(ResumableDownloadPlugin.class)' not in source:
+              if 'import com.getcapacitor.BridgeActivity;' not in source: raise RuntimeError('Cannot locate BridgeActivity import')
               source=source.replace('import com.getcapacitor.BridgeActivity;', 'import com.getcapacitor.BridgeActivity;\nimport com.zenni.pokevoid.ResumableDownloadPlugin;\nimport android.os.Bundle;')
               marker='public class MainActivity extends BridgeActivity {'
               if marker not in source: raise RuntimeError('Generated MainActivity layout changed')
@@ -102,7 +103,11 @@ jobs:
           p=Path('android/app/src/main/AndroidManifest.xml')
           text=p.read_text()
           assert '<application' in text
-          text=text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          import re
+          if re.search(r'android:usesCleartextTraffic\\s*=', text):
+              text=re.sub(r'android:usesCleartextTraffic\\s*=\\s*"[^"]*"', 'android:usesCleartextTraffic="true"', text, count=1)
+          else:
+              text=text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
           p.write_text(text)
           PY
           chmod +x android/gradlew
