@@ -62,9 +62,37 @@ function showOverlay(): { message: (s: string) => void; remove: () => void } {
   return { message: (s) => { el.textContent = s; }, remove: () => el.remove() };
 }
 
+/** Manually remove only inactive updater bundles. Never touch game saves or the active bundle. */
+async function cleanUnusedBundles(): Promise<void> {
+  const current = await CapacitorUpdater.current();
+  const activeId = current.bundle?.id;
+  if (!activeId || activeId === 'builtin') throw new Error('Active game bundle could not be verified');
+  const result = await CapacitorUpdater.list();
+  const unused = result.bundles.filter(b => b.id && b.id !== activeId && b.id !== 'builtin');
+  if (!unused.length) { window.alert('No unused game bundles found.'); return; }
+  if (!window.confirm(`Delete ${unused.length} unused game bundle(s)? The active game and saves will be kept.`)) return;
+  let removed = 0;
+  for (const bundle of unused) {
+    try { await CapacitorUpdater.delete({ id: bundle.id }); removed++; }
+    catch (error) { console.warn('[UpdateGate] Failed to delete inactive bundle', bundle.id, error); }
+  }
+  window.alert(`Removed ${removed} of ${unused.length} unused game bundles. Saves were not touched.`);
+}
+function installStorageControl(): void {
+  if (document.getElementById('pokevoid-storage-cleanup')) return;
+  const button = document.createElement('button');
+  button.id = 'pokevoid-storage-cleanup';
+  button.textContent = 'Clean unused bundles';
+  button.title = 'Delete old inactive game versions without deleting saves';
+  Object.assign(button.style, { position: 'fixed', right: '8px', bottom: '8px', zIndex: '2147483646', padding: '8px', font: '12px system-ui', opacity: '0.8' });
+  button.addEventListener('click', () => { void cleanUnusedBundles().catch(error => { console.error(error); window.alert('Cleanup unavailable: unable to verify installed bundles. No files were deleted.'); }); });
+  document.body.append(button);
+}
+
 /** Returns false when activation has started and Phaser must NOT boot in this document. */
 export async function updateBeforeGame(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true;
+  installStorageControl();
   // Capgo needs a readiness acknowledgement on every launch, including offline launches.
   try { await CapacitorUpdater.notifyAppReady(); } catch (error) { console.warn('[UpdateGate] notifyAppReady failed', error); }
   const release = await checkRelease();
