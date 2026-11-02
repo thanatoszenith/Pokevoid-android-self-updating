@@ -10,6 +10,16 @@ const progressBar = document.getElementById('download-progress') as HTMLProgress
 const progressDetails = document.getElementById('download-details') as HTMLDivElement;
 let downloadStarted = 0;
 let lastPercent = 0;
+let totalBytes: number | undefined;
+const formatBytes = (bytes: number) => bytes >= 1024 * 1024 * 1024 ? `${(bytes / (1024 ** 3)).toFixed(2)} GB` : `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
+async function fetchBundleSize(url: string): Promise<number | undefined> {
+  try {
+    const response = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+    if (!response.ok) return undefined;
+    const size = Number(response.headers.get('content-length'));
+    return Number.isSafeInteger(size) && size > 0 ? size : undefined;
+  } catch { return undefined; }
+}
 function formatDuration(seconds: number): string {
   const n = Math.max(0, Math.ceil(seconds));
   return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.floor(n % 3600 / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
@@ -21,7 +31,7 @@ function showProgress(percent?: number) {
   if (lastPercent > 0) {
     progressBar.value = lastPercent;
     const eta = lastPercent >= 100 ? 'Finishing…' : elapsed > 2 ? `About ${formatDuration(elapsed * (100 - lastPercent) / lastPercent)} remaining` : 'Calculating remaining time…';
-    progressDetails.textContent = `${lastPercent.toFixed(1)}% • ${formatDuration(elapsed)} elapsed • ${eta}`;
+    progressDetails.textContent = totalBytes ? `${formatBytes(totalBytes * lastPercent / 100)} downloaded • ${formatBytes(totalBytes * (100 - lastPercent) / 100)} remaining • ${eta}` : `${lastPercent.toFixed(1)}% • ${formatDuration(elapsed)} elapsed • ${eta}`;
   } else {
     progressBar.removeAttribute('value');
     progressDetails.textContent = `Downloading • ${formatDuration(elapsed)} elapsed • Waiting for progress…`;
@@ -117,6 +127,7 @@ async function main() {
       status.textContent = 'Downloading game… Keep this app open.';
       downloadStarted = Date.now();
       lastPercent = 0;
+      totalBytes = await fetchBundleSize(latest.url);
       showProgress();
       const progressListener = await CapacitorUpdater.addListener('download', (event: {percent?: number}) => {
         showProgress(event.percent);
