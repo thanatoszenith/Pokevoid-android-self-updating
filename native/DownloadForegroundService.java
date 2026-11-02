@@ -39,6 +39,12 @@ public class DownloadForegroundService extends Service {
             builder.setContentText((downloaded / 1048576L) + " MiB received")
                     .setProgress(0, 0, true);
         }
+        Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+        if (launch != null) {
+            PendingIntent openApp = PendingIntent.getActivity(context, 0, launch,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            builder.setContentIntent(openApp);
+        }
         try { manager.notify(NOTIFICATION_ID, builder.build()); }
         catch (SecurityException error) { android.util.Log.w("PokeVoid", "Download notification permission unavailable", error); }
     }
