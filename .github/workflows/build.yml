@@ -111,6 +111,10 @@ jobs:
           p.write_text(text)
           PY
           chmod +x android/gradlew
+          # Fail before Gradle if native registration or permissions were not generated.
+          grep -R -Fq 'registerPlugin(ResumableDownloadPlugin.class)' android/app/src/main/java
+          test -s android/app/src/main/java/com/zenni/pokevoid/ResumableDownloadPlugin.java
+          grep -Fq 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
           cd android && ./gradlew assembleDebug
       - name: Verify artifacts
         env:
@@ -118,6 +122,10 @@ jobs:
         run: |
           test -s game/android/app/build/outputs/apk/debug/app-debug.apk
           node wrapper/scripts/verify-apk.mjs game/android/app/build/outputs/apk/debug/app-debug.apk
+          # Ensure native downloader code is actually packaged, not just present in sources.
+          if command -v dexdump >/dev/null 2>&1; then
+            unzip -p game/android/app/build/outputs/apk/debug/app-debug.apk classes.dex | dexdump -d /dev/stdin | grep -q 'ResumableDownloadPlugin'
+          fi
           test -s "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-daily-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
