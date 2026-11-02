@@ -98,7 +98,7 @@ function installStorageControl(): void {
 /** Recover a fully downloaded, verified bundle after an app restart without downloading it twice. */
 async function findReadyBundle(version: string, checksum: string) {
   const { bundles } = await CapacitorUpdater.list();
-  return bundles.find(bundle => bundle.version === version && bundle.status === 'success' && bundle.checksum?.toLowerCase() === checksum.toLowerCase());
+  return bundles.find(bundle => bundle.version === version && bundle.status === 'success' && (bundle as typeof bundle & { checksum?: string }).checksum?.toLowerCase() === checksum.toLowerCase());
 }
 /** Returns false when activation has started and Phaser must NOT boot in this document. */
 export async function updateBeforeGame(): Promise<boolean> {
