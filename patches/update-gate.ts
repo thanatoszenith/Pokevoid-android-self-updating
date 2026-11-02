@@ -126,6 +126,7 @@ export async function updateBeforeGame(): Promise<boolean> {
       const archive = await ResumableDownload.download({ url: release.url, checksum: release.checksum });
       overlay.message('Importing verified update…');
       bundle = await CapacitorUpdater.download({ url: archive.url, version: release.version, checksum: release.checksum });
+      await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
     } finally { await listener.remove(); }
     overlay.message('Installing update…');
     await CapacitorUpdater.set(bundle); // Capgo switches/reloads the web bundle.
