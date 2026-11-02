@@ -1,4 +1,5 @@
 import { ResumableDownload } from './resumable-download';
+import { configureSharedStorage } from './shared-storage';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
@@ -85,6 +86,14 @@ async function cleanUnusedBundles(): Promise<void> {
   window.alert(`Removed ${removed} of ${unused.length} unused game bundles. Saves were not touched.`);
 }
 function installStorageControl(): void {
+  if (!document.getElementById('pokevoid-shared-storage')) {
+    const storage = document.createElement('button');
+    storage.id = 'pokevoid-shared-storage';
+    storage.textContent = 'PokeVoid folder access';
+    Object.assign(storage.style, { position: 'fixed', right: '8px', bottom: '48px', zIndex: '2147483646', padding: '8px', font: '12px system-ui' });
+    storage.addEventListener('click', () => { void configureSharedStorage().catch(error => { console.warn(error); window.alert('Storage access unavailable. Existing saves were not changed.'); }); });
+    document.body.append(storage);
+  }
   if (document.getElementById('pokevoid-storage-cleanup')) return;
   const button = document.createElement('button');
   button.id = 'pokevoid-storage-cleanup';
