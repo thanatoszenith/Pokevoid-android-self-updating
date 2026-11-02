@@ -6,6 +6,8 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.PluginMethod;
 import java.io.*;
+import android.content.Intent;
+import androidx.core.content.ContextCompat;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -29,6 +31,12 @@ public class ResumableDownloadPlugin extends Plugin {
         String url = call.getString("url"), sha = call.getString("checksum");
         if (url == null || sha == null || !sha.matches("[a-fA-F0-9]{64}")) {
             call.reject("Missing URL or SHA-256"); return;
+        }
+        try {
+            ContextCompat.startForegroundService(getContext(), new Intent(getContext(), DownloadForegroundService.class));
+        } catch (Exception error) {
+            call.reject("Unable to start background download service", error);
+            return;
         }
         executor.execute(() -> {
             try {
@@ -54,6 +62,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 result.put("url", startLocalServer(complete));
                 call.resolve(result);
             } catch (Exception error) { call.reject("Resumable download failed", error); }
+            finally { getContext().stopService(new Intent(getContext(), DownloadForegroundService.class)); }
         });
     }
 
