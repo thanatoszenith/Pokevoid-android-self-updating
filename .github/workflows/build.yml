@@ -111,10 +111,10 @@ jobs:
           # Android 14+ requires explicit dataSync service type and permissions.
           for permission in ('android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_DATA_SYNC'):
               if f'android:name="{permission}"' not in text:
-                  text=text.replace('<application', f'<uses-permission android:name="{permission}" />\\n    <application', 1)
+                  text=text.replace('<application', f'<uses-permission android:name="{permission}" />\n    <application', 1)
           service='<service android:name="com.zenni.pokevoid.DownloadForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />'
           if 'DownloadForegroundService' not in text:
-              text=text.replace('</application>', f'    {service}\\n    </application>', 1)
+              text=text.replace('</application>', f'    {service}\n    </application>', 1)
           p.write_text(text)
           PY
           chmod +x android/gradlew
