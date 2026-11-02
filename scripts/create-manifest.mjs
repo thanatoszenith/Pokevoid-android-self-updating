@@ -7,5 +7,5 @@ const url=new URL(`pokevoid-game-${version}.zip`,base);
 if(url.protocol!=='https:' || !url.hostname) throw Error('HTTPS release base required');
 const filename=`pokevoid-game-${version}.zip`;
 const checksum=crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
-fs.writeFileSync('capacitor-update.json',JSON.stringify({version,url:url.href,checksum,features:['offline-daily-v1','official-daily-cache-v1']},null,2)+'\n');
+fs.writeFileSync('capacitor-update.json',JSON.stringify({version,url:url.href,checksum,upstreamCommit:process.env.POKEVOID_UPSTREAM_COMMIT,features:['offline-daily-v1','official-daily-cache-v1']},null,2)+'\n');
 console.log('Created capacitor-update.json for',filename);
