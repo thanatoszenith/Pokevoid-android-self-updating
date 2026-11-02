@@ -18,11 +18,13 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @CapacitorPlugin(name = "ResumableDownload")
 public class ResumableDownloadPlugin extends Plugin {
     private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService clients = new ThreadPoolExecutor(2, 4, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(8));
+    private final AtomicInteger activeDownloads = new AtomicInteger();
     private volatile ServerSocket server;
     private volatile String serverToken;
     private volatile String servedChecksum;
@@ -39,6 +41,7 @@ public class ResumableDownloadPlugin extends Plugin {
             call.reject("Unable to start background download service", error);
             return;
         }
+        activeDownloads.incrementAndGet();
         executor.execute(() -> {
             try {
                 URL source = new URL(url);
@@ -65,7 +68,10 @@ public class ResumableDownloadPlugin extends Plugin {
                 result.put("url", startLocalServer(complete, key));
                 call.resolve(result);
             } catch (Exception error) { call.reject("Resumable download failed", error); }
-            finally { getContext().stopService(new Intent(getContext(), DownloadForegroundService.class)); }
+            finally {
+                if (activeDownloads.decrementAndGet() == 0)
+                    getContext().stopService(new Intent(getContext(), DownloadForegroundService.class));
+            }
         });
     }
 
