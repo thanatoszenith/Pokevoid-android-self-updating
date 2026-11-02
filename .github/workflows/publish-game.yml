@@ -131,6 +131,23 @@ jobs:
           fi
           gh release upload game-feed --repo "$GITHUB_REPOSITORY" "pokevoid-game-${POKEVOID_VERSION}.zip"
 
+      - name: Verify release ZIP is publicly downloadable before advertising it
+        if: ${{ inputs.publish }}
+        env:
+          POKEVOID_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ASSET_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/game-feed/pokevoid-game-${POKEVOID_VERSION}.zip"
+          for attempt in $(seq 1 8); do
+            if curl --head --fail --location --silent --show-error --max-time 45 "$ASSET_URL" -o /dev/null; then
+              echo "Release ZIP is publicly accessible"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Release ZIP is not publicly accessible; refusing to publish its feed" >&2
+          exit 1
+
       - name: Prepare Pages update manifest
         if: ${{ inputs.publish }}
         env:
