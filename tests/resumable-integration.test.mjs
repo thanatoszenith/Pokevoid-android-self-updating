@@ -91,7 +91,8 @@ test('network failures retain partial downloads for subsequent HTTP Range retrie
   assert.match(native, /offset = partial\.exists\(\) \? partial\.length\(\) : 0/);
   assert.match(native, /if \(c != null\) c\.disconnect\(\)/);
   assert.match(native, /Response exceeded advertised size/);
-  assert.match(native, /end != declaredTotal - 1/);
+  assert.match(native, /responseEnd = end/);
+  assert.match(native, /Response exceeded declared Content-Range/);
 });
 
 test('oversized HTTP range integers do not terminate the loopback response silently', () => {
@@ -277,4 +278,13 @@ test('foreground service stays alive until all queued download requests finish',
   assert.match(native, /AtomicInteger activeDownloads/);
   assert.match(native, /activeDownloads\.incrementAndGet\(\)/);
   assert.match(native, /activeDownloads\.decrementAndGet\(\) == 0/);
+});
+
+test('repeated HTTP 416 responses cannot cause an endless retry loop', () => {
+  assert.match(native, /boolean rangeReset = false/);
+  assert.match(native, /if \(rangeReset\) throw new IOException\("Server repeatedly rejected resume range"\)/);
+});
+test('executor rejection releases foreground download accounting', () => {
+  assert.match(native, /catch \(RejectedExecutionException error\)/);
+  assert.match(native, /call\.reject\("Download queue unavailable", error\)/);
 });
