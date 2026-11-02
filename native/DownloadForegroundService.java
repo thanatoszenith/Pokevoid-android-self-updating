@@ -15,7 +15,16 @@ public class DownloadForegroundService extends Service {
     private static final String CHANNEL = "pokevoid_download";
     private static final int NOTIFICATION_ID = 4207;
 
-    public static void updateProgress(Context context, long downloaded, long total) {
+    private static long lastNotificationMs = 0L;
+    private static long lastNotificationBytes = -1L;
+
+    public static synchronized void updateProgress(Context context, long downloaded, long total) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        boolean complete = total > 0 && downloaded >= total;
+        if (!complete && lastNotificationBytes >= 0 && downloaded >= lastNotificationBytes
+                && now - lastNotificationMs < 1000L) return;
+        lastNotificationMs = now;
+        lastNotificationBytes = downloaded;
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL)
@@ -30,7 +39,8 @@ public class DownloadForegroundService extends Service {
             builder.setContentText((downloaded / 1048576L) + " MiB received")
                     .setProgress(0, 0, true);
         }
-        manager.notify(NOTIFICATION_ID, builder.build());
+        try { manager.notify(NOTIFICATION_ID, builder.build()); }
+        catch (SecurityException error) { android.util.Log.w("PokeVoid", "Download notification permission unavailable", error); }
     }
 
     @Override public void onCreate() {
