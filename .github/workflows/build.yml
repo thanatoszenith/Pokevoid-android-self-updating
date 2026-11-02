@@ -123,7 +123,9 @@ jobs:
           test -s game/android/app/build/outputs/apk/debug/app-debug.apk
           node wrapper/scripts/verify-apk.mjs game/android/app/build/outputs/apk/debug/app-debug.apk
           # Verify the compiled DEX contains the native plugin class.
-          unzip -p game/android/app/build/outputs/apk/debug/app-debug.apk classes.dex | strings | grep -Fq 'ResumableDownloadPlugin'
+          unzip -p game/android/app/build/outputs/apk/debug/app-debug.apk classes.dex > /tmp/pokevoid-classes.dex
+          strings /tmp/pokevoid-classes.dex > /tmp/pokevoid-classes-strings.txt
+          grep -Fq 'ResumableDownloadPlugin' /tmp/pokevoid-classes-strings.txt
           test -s "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
           node wrapper/scripts/verify-daily-bundle.mjs "pokevoid-game-${POKEVOID_VERSION}.zip"
