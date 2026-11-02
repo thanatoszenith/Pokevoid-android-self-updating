@@ -81,7 +81,7 @@ jobs:
           npx cap sync android
           # Register the native resumable downloader in the generated Capacitor activity.
           mkdir -p android/app/src/main/java/com/zenni/pokevoid
-          cp ../wrapper/native/ResumableDownloadPlugin.java android/app/src/main/java/com/zenni/pokevoid/
+          cp ../wrapper/native/ResumableDownloadPlugin.java ../wrapper/native/DownloadForegroundService.java android/app/src/main/java/com/zenni/pokevoid/
           # Patch the generated MainActivity in place; never add a duplicate class.
           python3 - <<'PY'
           from pathlib import Path
@@ -108,12 +108,21 @@ jobs:
               text=re.sub('android:usesCleartextTraffic="[^"]*"', 'android:usesCleartextTraffic="true"', text, count=1)
           else:
               text=text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          # Android 14+ requires explicit dataSync service type and permissions.
+          for permission in ('android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_DATA_SYNC'):
+              if f'android:name="{permission}"' not in text:
+                  text=text.replace('<application', f'<uses-permission android:name="{permission}" />\\n    <application', 1)
+          service='<service android:name="com.zenni.pokevoid.DownloadForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />'
+          if 'DownloadForegroundService' not in text:
+              text=text.replace('</application>', f'    {service}\\n    </application>', 1)
           p.write_text(text)
           PY
           chmod +x android/gradlew
           # Fail before Gradle if native registration or permissions were not generated.
           grep -R -Fq 'registerPlugin(ResumableDownloadPlugin.class)' android/app/src/main/java
           test -s android/app/src/main/java/com/zenni/pokevoid/ResumableDownloadPlugin.java
+          test -s android/app/src/main/java/com/zenni/pokevoid/DownloadForegroundService.java
+          grep -Fq 'android:foregroundServiceType="dataSync"' android/app/src/main/AndroidManifest.xml
           grep -Fq 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
           cd android && ./gradlew assembleDebug
       - name: Verify artifacts
