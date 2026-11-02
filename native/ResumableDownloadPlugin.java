@@ -90,6 +90,7 @@ public class ResumableDownloadPlugin extends Plugin {
             connection.setReadTimeout(30000);
             connection.setRequestProperty("Accept-Encoding", "identity");
             if (offset > 0) connection.setRequestProperty("Range", "bytes=" + offset + "-");
+            boolean returned = false;
             try {
                 int status = connection.getResponseCode();
                 if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
@@ -100,14 +101,12 @@ public class ResumableDownloadPlugin extends Plugin {
                         throw new IOException("Non-HTTPS or credential-bearing redirect refused");
                     }
                     target = next;
-                    continue;
+                } else {
+                    returned = true;
+                    return connection;
                 }
-                return connection;
             } finally {
-                if (connection.getHeaderField("Location") != null &&
-                        (connection.getResponseCode() == 301 || connection.getResponseCode() == 302 ||
-                         connection.getResponseCode() == 303 || connection.getResponseCode() == 307 ||
-                         connection.getResponseCode() == 308)) connection.disconnect();
+                if (!returned) connection.disconnect();
             }
         }
         throw new IOException("Too many download redirects");
