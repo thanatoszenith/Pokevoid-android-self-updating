@@ -101,6 +101,79 @@ public class ExternalGamePlugin extends Plugin {
         }, "pokevoid-external-install").start();
     }
 
+    /**
+     * Activate a fully extracted version without copying it to app-private storage.
+     * Keep the prior installation until the new directory is safely in place.
+     * If promotion fails, restore the old installation before reporting failure.
+     */
+    @PluginMethod
+    public void activate(PluginCall call) {
+        String sha = call.getString("checksum");
+        if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) {
+            call.reject("Invalid staged version"); return;
+        }
+        synchronized (this) {
+            try {
+                File root = gameRoot();
+                File staged = new File(root, ".staging-" + sha.toLowerCase(Locale.ROOT));
+                File active = new File(root, "current");
+                File previous = new File(root, ".previous");
+                if (!new File(staged, "index.html").isFile()) throw new IOException("Staged game is incomplete");
+                if (previous.exists()) throw new IOException("Previous installation recovery pending; refusing destructive activation");
+                boolean movedOld = false;
+                if (active.exists()) {
+                    if (!active.renameTo(previous)) throw new IOException("Cannot preserve previous game");
+                    movedOld = true;
+                }
+                if (!staged.renameTo(active)) {
+                    if (movedOld && !previous.renameTo(active))
+                        throw new IOException("Activation failed; previous game remains at " + previous.getAbsolutePath());
+                    throw new IOException("Cannot activate staged game");
+                }
+                // Preserve the previous version until the new version has been
+                // successfully loaded and acknowledged by the WebView.
+                JSObject result = new JSObject();
+                result.put("path", active.getAbsolutePath());
+                result.put("previousRetained", movedOld);
+                call.resolve(result);
+            } catch (Exception error) { call.reject("External game activation failed", error); }
+        }
+    }
+
+    @PluginMethod
+    public void confirmLaunch(PluginCall call) {
+        synchronized (this) {
+            try {
+                File root = gameRoot();
+                if (!new File(root, "current/index.html").isFile()) throw new IOException("No active game to confirm");
+                File previous = new File(root, ".previous");
+                if (previous.exists()) {
+                    deleteTree(previous);
+                    if (previous.exists()) throw new IOException("Cannot remove obsolete previous game");
+                }
+                call.resolve();
+            } catch (Exception error) { call.reject("Game confirmation cleanup failed", error); }
+        }
+    }
+
+    @PluginMethod
+    public void recover(PluginCall call) {
+        synchronized (this) {
+            try {
+                File root = gameRoot();
+                File active = new File(root, "current");
+                File previous = new File(root, ".previous");
+                if (!active.exists() && previous.exists()) {
+                    if (!previous.renameTo(active)) throw new IOException("Cannot restore previous game");
+                }
+                JSObject result = new JSObject();
+                result.put("installed", new File(active, "index.html").isFile());
+                result.put("previousRetained", previous.exists());
+                call.resolve(result);
+            } catch (Exception error) { call.reject("Game recovery failed", error); }
+        }
+    }
+
     private static boolean matches(File file, String sha) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
