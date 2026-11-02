@@ -181,7 +181,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (range != null && !range.matches("bytes=\\d+-\\d*")) return;
                 if (start > end || start >= file.length()) {
                     OutputStream out = s.getOutputStream();
-                    out.write(("HTTP/1.1 416 Range Not Satisfiable\\r\\nContent-Range: bytes */" + file.length() + "\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n").getBytes(StandardCharsets.US_ASCII));
+                    out.write(("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */" + file.length() + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
                     out.flush(); return;
                 }
                 boolean partial = start > 0 || end < file.length() - 1;
