@@ -79,6 +79,29 @@ jobs:
           node ../wrapper/scripts/verify-bootstrap.mjs dist
           npx cap add android
           npx cap sync android
+          # Register the native resumable downloader in the generated Capacitor activity.
+          mkdir -p android/app/src/main/java/com/zenni/pokevoid
+          cp ../wrapper/native/ResumableDownloadPlugin.java android/app/src/main/java/com/zenni/pokevoid/
+          cat > android/app/src/main/java/com/zenni/pokevoid/MainActivity.java <<'JAVA'
+          package com.zenni.pokevoid;
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+            @Override public void onCreate(Bundle savedInstanceState) {
+              registerPlugin(ResumableDownloadPlugin.class);
+              super.onCreate(savedInstanceState);
+            }
+          }
+          JAVA
+          # Capgo imports a verified archive over a loopback-only HTTP server.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          text=p.read_text()
+          assert '<application' in text
+          text=text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          p.write_text(text)
+          PY
           chmod +x android/gradlew
           cd android && ./gradlew assembleDebug
       - name: Verify artifacts
