@@ -47,3 +47,18 @@ test('build patches the generated activity rather than introducing a duplicate',
   assert.match(workflow, /rglob\('MainActivity\.java'\)/);
   assert.doesNotMatch(workflow, /cat > android\/app\/src\/main\/java\/com\/zenni\/pokevoid\/MainActivity\.java/);
 });
+
+test('successful bundles remain recoverable when Capgo omits checksum metadata', () => {
+  for (const source of [bootstrap, gate]) {
+    assert.match(source, /bundle\.status === 'success'/);
+    assert.match(source, /!\(bundle as typeof bundle & \{ checksum\?: string \}\)\.checksum/);
+  }
+});
+
+test('publication validates public ZIP before deploying the update feed', () => {
+  const publish = fs.readFileSync('.github/workflows/publish-game.yml', 'utf8');
+  const zipCheck = publish.indexOf('Verify release ZIP is publicly downloadable');
+  const feedDeployment = publish.indexOf('Prepare Pages update manifest');
+  assert.ok(zipCheck >= 0 && feedDeployment > zipCheck);
+  assert.match(publish, /curl --head --fail --location/);
+});
