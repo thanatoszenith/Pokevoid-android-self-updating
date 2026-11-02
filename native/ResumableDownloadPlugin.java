@@ -61,8 +61,8 @@ public class ResumableDownloadPlugin extends Plugin {
                     }
                     if (!partial.renameTo(complete)) throw new IOException("Cannot finalize verified ZIP");
                 }
-                try { SharedStoragePlugin.mirrorArchive(complete, key); }
-                catch (IOException | SecurityException error) { android.util.Log.w("PokeVoid", "Shared archive backup deferred", error); }
+                // Do not duplicate the large archive in shared storage. The external
+                // installer will extract verified assets directly into PokeVoid/Game.
                 JSObject result = new JSObject();
                 result.put("bytes", complete.length());
                 result.put("url", startLocalServer(complete, key));
@@ -94,6 +94,8 @@ public class ResumableDownloadPlugin extends Plugin {
                     }
                 }
                 if (archive.exists() && !archive.delete()) throw new IOException("Could not remove imported archive");
+                File partial = new File(dir, sha.toLowerCase(Locale.ROOT) + ".part");
+                if (partial.exists() && !partial.delete()) throw new IOException("Could not remove obsolete partial archive");
                 call.resolve();
             } catch (Exception error) { call.reject("Archive cleanup failed", error); }
         });
