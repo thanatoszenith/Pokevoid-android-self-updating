@@ -1,0 +1,45 @@
+name: Monitor upstream PokéVoid updates
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: pokevoid-upstream-monitor
+  cancel-in-progress: false
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare upstream HEAD with published game
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_FEED: https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_SHA="$(gh api repos/smittynugget/pokevoid/commits/HEAD --jq .sha)"
+          [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "Latest upstream: $UPSTREAM_SHA"
+          curl --fail --location --silent --show-error --retry 3 "$UPDATE_FEED" -o published.json
+          PUBLISHED_SHA="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("published.json","utf8"));console.log(d.upstreamCommit||"")')"
+          echo "Published upstream: ${PUBLISHED_SHA:-unknown}"
+          if [[ "$PUBLISHED_SHA" == "$UPSTREAM_SHA" ]]; then
+            echo "No new upstream commit; nothing to publish."
+            exit 0
+          fi
+          # Confirm the published commit is an ancestor before publishing a newer build.
+          if [[ "$PUBLISHED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            git init -q upstream-check
+            git -C upstream-check remote add origin https://github.com/smittynugget/pokevoid.git
+            git -C upstream-check fetch -q --depth=100 origin "$UPSTREAM_SHA"
+            if ! git -C upstream-check cat-file -e "$PUBLISHED_SHA^{commit}" 2>/dev/null; then
+              git -C upstream-check fetch -q origin "$PUBLISHED_SHA"
+            fi
+            git -C upstream-check merge-base --is-ancestor "$PUBLISHED_SHA" "$UPSTREAM_SHA" || { echo "Published commit is not an ancestor of upstream HEAD; refusing automatic update."; exit 1; }
+          fi
+          VERSION="$(date -u +%Y%m%d.%H%M%S)"
+          echo "Publishing upstream $UPSTREAM_SHA as game version $VERSION"
+          gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f version="$VERSION" -f upstream_ref="$UPSTREAM_SHA" -f publish=true
