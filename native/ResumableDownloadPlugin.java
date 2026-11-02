@@ -71,6 +71,8 @@ public class ResumableDownloadPlugin extends Plugin {
 
     private void fetch(URL url, File partial, String checksum) throws Exception {
         long offset = partial.exists() ? partial.length() : 0;
+        // A killed process may leave a fully downloaded archive with its .part name.
+        if (offset > 0 && matches(partial, checksum)) return;
         for (int attempt = 0; attempt < 5; attempt++) {
             HttpURLConnection c = (HttpURLConnection) url.openConnection();
             c.setConnectTimeout(20000); c.setReadTimeout(30000);
