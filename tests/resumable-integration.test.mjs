@@ -93,3 +93,13 @@ test('network failures retain partial downloads for subsequent HTTP Range retrie
   assert.match(native, /Response exceeded advertised size/);
   assert.match(native, /end != declaredTotal - 1/);
 });
+
+test('oversized HTTP range integers do not terminate the loopback response silently', () => {
+  assert.match(native, /catch \(NumberFormatException invalidRange\)/);
+  assert.match(native, /start = file\.length\(\)/);
+  assert.match(native, /416 Range Not Satisfiable/);
+});
+
+test('game update progress listener cleanup cannot invalidate a successful import', () => {
+  assert.match(gate, /listener\.remove\(\)\.catch\(/);
+});
