@@ -10,24 +10,57 @@ const progressArea = document.getElementById('progress-area') as HTMLDivElement;
 const progressBar = document.getElementById('download-progress') as HTMLProgressElement;
 const progressDetails = document.getElementById('download-details') as HTMLDivElement;
 let downloadStarted = 0;
-let lastPercent = 0;
-let totalBytes: number | undefined;
-const formatBytes = (bytes: number) => bytes >= 1024 * 1024 * 1024 ? `${(bytes / (1024 ** 3)).toFixed(2)} GB` : `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
+let lastSampleTime = 0;
+let lastSampleBytes = 0;
+let smoothedSpeed = 0;
+let lastDownloaded = 0;
+let lastTotal = 0;
+const formatBytes = (bytes: number) => bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(2)} GiB` : `${(bytes / 1048576).toFixed(1)} MiB`;
 function formatDuration(seconds: number): string {
   const n = Math.max(0, Math.ceil(seconds));
   return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.floor(n % 3600 / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
 }
-function showProgress(percent?: number) {
+function resetProgress() {
+  downloadStarted = Date.now();
+  lastSampleTime = 0;
+  lastSampleBytes = 0;
+  smoothedSpeed = 0;
+  lastDownloaded = 0;
+  lastTotal = 0;
   progressArea.hidden = false;
-  const elapsed = (Date.now() - downloadStarted) / 1000;
-  if (typeof percent === 'number' && Number.isFinite(percent)) lastPercent = Math.max(lastPercent, Math.min(100, Math.max(0, percent)));
-  if (lastPercent > 0) {
-    progressBar.value = lastPercent;
-    const eta = lastPercent >= 100 ? 'Finishing…' : elapsed > 2 ? `About ${formatDuration(elapsed * (100 - lastPercent) / lastPercent)} remaining` : 'Calculating remaining time…';
-    progressDetails.textContent = totalBytes ? `${formatBytes(totalBytes * lastPercent / 100)} downloaded • ${formatBytes(Math.max(0, totalBytes * (100 - lastPercent) / 100))} remaining • ${eta}` : `${lastPercent.toFixed(1)}% • ${formatDuration(elapsed)} elapsed • ${eta}`;
+  progressBar.removeAttribute('value');
+  progressDetails.textContent = 'Connecting…';
+}
+function showProgress(downloaded: number, total: number) {
+  if (!Number.isFinite(downloaded) || downloaded < 0) return;
+  const now = Date.now();
+  const done = Math.max(0, downloaded);
+  if (lastSampleTime && done < lastSampleBytes) {
+    smoothedSpeed = 0;
+    lastSampleTime = 0;
+  }
+  if (lastSampleTime && now - lastSampleTime >= 800) {
+    const delta = done - lastSampleBytes;
+    const instant = delta > 0 ? delta * 1000 / (now - lastSampleTime) : 0;
+    smoothedSpeed = smoothedSpeed > 0 ? 0.3 * instant + 0.7 * smoothedSpeed : instant;
+    lastSampleTime = now;
+    lastSampleBytes = done;
+  } else if (!lastSampleTime) {
+    lastSampleTime = now;
+    lastSampleBytes = done;
+  }
+  lastDownloaded = done;
+  if (Number.isFinite(total) && total > 0) lastTotal = total;
+  progressArea.hidden = false;
+  if (lastTotal > 0) {
+    const percent = Math.min(100, 100 * done / lastTotal);
+    progressBar.value = percent;
+    const remaining = Math.max(0, lastTotal - done);
+    const eta = remaining === 0 ? 'Verifying…' : smoothedSpeed > 1024 ? `ETA ${formatDuration(remaining / smoothedSpeed)}` : 'ETA calculating…';
+    progressDetails.textContent = `${percent.toFixed(1)}% • ${formatBytes(done)} / ${formatBytes(lastTotal)} • ${formatBytes(remaining)} left • ${smoothedSpeed > 1024 ? formatBytes(smoothedSpeed) + '/s' : 'Speed calculating…'} • ${eta}`;
   } else {
     progressBar.removeAttribute('value');
-    progressDetails.textContent = `Downloading • ${formatDuration(elapsed)} elapsed • Waiting for progress…`;
+    progressDetails.textContent = `${formatBytes(done)} downloaded • Total unknown • ${smoothedSpeed > 1024 ? formatBytes(smoothedSpeed) + '/s' : 'Speed calculating…'}`;
   }
 }
 let busy = false;
@@ -123,10 +156,7 @@ async function main() {
   const install = async () => {
     try {
       status.textContent = 'Downloading game… Keep this app open.';
-      downloadStarted = Date.now();
-      lastPercent = 0;
-      totalBytes = undefined; // Native progress reports actual response size without a CORS-blocked HEAD request.
-      showProgress();
+      resetProgress();
       const ready = await findReadyBundle(latest.version, latest.checksum).catch(error => { console.warn('Bundle recovery lookup failed', error); return undefined; });
       if (ready) {
         status.textContent = 'Restoring previously downloaded game…';
@@ -134,8 +164,7 @@ async function main() {
         return;
       }
       const progressListener = await ResumableDownload.addListener('progress', event => {
-        if (event.total > 0) { totalBytes = event.total; showProgress(100 * event.downloaded / event.total); }
-        else { progressArea.hidden = false; progressDetails.textContent = `${formatBytes(event.downloaded)} downloaded • total unknown`; }
+        showProgress(event.downloaded, event.total);
       });
       let bundle;
       try {
@@ -146,7 +175,7 @@ async function main() {
       } finally {
         await progressListener.remove().catch(error => console.warn('Progress listener cleanup failed', error));
       }
-      showProgress(100);
+      if (lastTotal > 0) showProgress(lastTotal, lastTotal);
       status.textContent = 'Installing game…';
       await CapacitorUpdater.set(bundle);
       status.textContent = 'Activation requested. If the game does not open, restart the app.';
