@@ -190,7 +190,7 @@ public class ResumableDownloadPlugin extends Plugin {
             try (Socket s = client; BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII))) {
                 s.setSoTimeout(30000);
                 String request = reader.readLine();
-                if (request == null || !(request.startsWith("GET /" + token + "/bundle.zip ") || request.startsWith("HEAD /" + token + "/bundle.zip "))) return;
+                if (request == null || request.length() > 8192 || !(request.equals("GET /" + token + "/bundle.zip HTTP/1.1") || request.equals("HEAD /" + token + "/bundle.zip HTTP/1.1"))) return;
                 String line, range = null;
                 int headerCount = 0;
                 while ((line = reader.readLine()) != null && !line.isEmpty()) {
@@ -204,7 +204,7 @@ public class ResumableDownloadPlugin extends Plugin {
                     if (pieces.length > 1 && !pieces[1].isEmpty()) end = Math.min(end, Long.parseLong(pieces[1]));
                 }
                 if (range != null && !range.matches("bytes=\\d+-\\d*")) return;
-                if (start > end || start >= file.length()) {
+                if (start > end || start >= file.length() || file.length() == 0) {
                     OutputStream out = s.getOutputStream();
                     out.write(("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */" + file.length() + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
                     out.flush(); return;
