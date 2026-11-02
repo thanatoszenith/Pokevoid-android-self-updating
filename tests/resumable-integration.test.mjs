@@ -232,3 +232,11 @@ test('bootstrap resumes a previously initiated download after process restart', 
   assert.match(bootstrap, /void exclusive\(install\)/);
   assert.match(bootstrap, /localStorage\.removeItem\(RESUME_KEY\)/);
 });
+
+test('previously approved interrupted game updates resume on the next launch', () => {
+  assert.match(gate, /pokevoid_pending_update/);
+  assert.match(gate, /pending\?\.version === release\.version && pending\?\.checksum === release\.checksum/);
+  assert.match(gate, /if \(!resume && !window\.confirm/);
+  assert.match(gate, /localStorage\.setItem\(RESUME_KEY/);
+  assert.match(gate, /localStorage\.removeItem\(RESUME_KEY\)/);
+});
