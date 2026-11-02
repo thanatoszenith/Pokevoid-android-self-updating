@@ -9,12 +9,20 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
 public class DownloadForegroundService extends Service {
     private static final String CHANNEL = "pokevoid_download";
     private static final int NOTIFICATION_ID = 4207;
 
+    private PowerManager.WakeLock downloadWakeLock;
+    private static final long WAKE_LOCK_TIMEOUT_MS = 10L * 60L * 1000L;
+    @Override public void onDestroy() {
+        if (downloadWakeLock != null && downloadWakeLock.isHeld()) downloadWakeLock.release();
+        downloadWakeLock = null;
+        super.onDestroy();
+    }
     private static long lastNotificationMs = 0L;
     private static long lastNotificationBytes = -1L;
 
@@ -51,6 +59,12 @@ public class DownloadForegroundService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
+        if (power != null) {
+            downloadWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PokeVoid:Download");
+            downloadWakeLock.setReferenceCounted(false);
+            downloadWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
+        }
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         manager.createNotificationChannel(new NotificationChannel(CHANNEL, "PokéVoid downloads", NotificationManager.IMPORTANCE_LOW));
         Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
@@ -71,6 +85,7 @@ public class DownloadForegroundService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (downloadWakeLock != null) downloadWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
         return START_NOT_STICKY;
     }
 
