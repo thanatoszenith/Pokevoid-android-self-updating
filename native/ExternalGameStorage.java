@@ -39,7 +39,7 @@ public final class ExternalGameStorage {
         if (!permitted()) throw new IOException("All files access is required for external game installation");
         if (!sameHash(archive, checksum)) throw new IOException("Game archive SHA-256 mismatch");
         File dest = release(checksum);
-        if (new File(dest, "index.html").isFile()) return dest;
+        if (new File(dest, "index.html").isFile()) return dest;\n        if (dest.exists()) throw new IOException("Existing incomplete release requires explicit recovery");
         if (!releases().isDirectory() && !releases().mkdirs()) throw new IOException("Cannot create game releases directory");
         File staging = new File(releases(), "." + checksum.toLowerCase(Locale.ROOT) + ".installing");
         if (staging.exists()) removeTree(staging);
