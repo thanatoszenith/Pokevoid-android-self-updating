@@ -32,11 +32,10 @@ public class ResumableDownloadPlugin extends Plugin {
                 if (!dir.exists() && !dir.mkdirs()) throw new IOException("Cannot create download directory");
                 String key = sha.toLowerCase(Locale.ROOT);
                 File partial = new File(dir, key + ".part"), complete = new File(dir, key + ".zip");
-                if (complete.exists() && matches(complete, key)) {
-                    sendProgress(complete.length(), complete.length());
-                }
-                if (!complete.exists() || !matches(complete, key)) {
-                    if (complete.exists()) complete.delete();
+                boolean verifiedComplete = complete.exists() && matches(complete, key);
+                if (verifiedComplete) sendProgress(complete.length(), complete.length());
+                if (!verifiedComplete) {
+                    if (complete.exists() && !complete.delete()) throw new IOException("Cannot replace corrupt cached archive");
                     fetch(source, partial, key);
                     if (!matches(partial, key)) {
                         partial.delete();
