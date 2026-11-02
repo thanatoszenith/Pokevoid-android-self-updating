@@ -1,3 +1,4 @@
+import { ResumableDownload } from './resumable-download';
 import { readUpdateFeed } from './read-update-feed';
 import { Capacitor } from '@capacitor/core';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
@@ -123,13 +124,14 @@ export async function updateBeforeGame(): Promise<boolean> {
       await CapacitorUpdater.set(ready);
       return false;
     }
-    const listener = await CapacitorUpdater.addListener('download', ({ percent }) => {
-      if (typeof percent !== 'number' || !Number.isFinite(percent)) return;
-      overlay.message(totalBytes ? `Downloading update: ${mb(totalBytes * percent / 100)} received • ${mb(totalBytes * (100 - percent) / 100)} remaining` : `Downloading update: ${percent.toFixed(1)}%`);
+    const listener = await ResumableDownload.addListener('progress', ({ downloaded, total }) => {
+      overlay.message(total > 0 ? `Downloading update: ${mb(downloaded)} received • ${mb(Math.max(0,total-downloaded))} remaining` : `Downloading update: ${mb(downloaded)} received`);
     });
     let bundle;
     try {
-      bundle = await CapacitorUpdater.download({ url: release.url, version: release.version, checksum: release.checksum });
+      const archive = await ResumableDownload.download({ url: release.url, checksum: release.checksum });
+      overlay.message('Importing verified update…');
+      bundle = await CapacitorUpdater.download({ url: archive.url, version: release.version, checksum: release.checksum });
     } finally { await listener.remove(); }
     overlay.message('Installing update…');
     await CapacitorUpdater.set(bundle); // Capgo switches/reloads the web bundle.
