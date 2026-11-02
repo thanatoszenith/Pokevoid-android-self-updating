@@ -248,3 +248,13 @@ test('background progress notifications are throttled and permission failures ar
   assert.match(service, /catch \(SecurityException error\)/);
   assert.match(native, /catch \(IOException \| SecurityException error\)/);
 });
+
+test('background downloads retain CPU access with bounded renewable wake lock', () => {
+  const service = fs.readFileSync('native/DownloadForegroundService.java', 'utf8');
+  assert.match(workflow, /android\.permission\.WAKE_LOCK/);
+  assert.match(service, /PowerManager\.PARTIAL_WAKE_LOCK/);
+  assert.match(service, /WAKE_LOCK_TIMEOUT_MS/);
+  assert.match(service, /refreshWakeLock\(now\)/);
+  assert.match(service, /downloadWakeLock\.release\(\)/);
+  assert.match(service, /START_NOT_STICKY/);
+});
