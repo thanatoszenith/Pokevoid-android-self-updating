@@ -1,5 +1,7 @@
 package com.zenni.pokevoid;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -10,6 +12,14 @@ public final class NativeSaveQueue {
         thread.setDaemon(true);
         return thread;
     });
+    /** Call on this queue: committed JSON records and user files are never removed. */
+    public static void cleanTemporarySaves(File directory) throws IOException {
+        File[] files = directory.listFiles((dir, name) -> name.startsWith(".pokevoid-") && name.endsWith(".tmp"));
+        if (files == null) throw new IOException("Cannot list temporary saves");
+        for (File file : files) {
+            if (file.isFile() && !file.delete()) throw new IOException("Cannot remove unfinished save transaction");
+        }
+    }
     private NativeSaveQueue() {}
     public static void execute(Runnable task) { writer.execute(task); }
 }

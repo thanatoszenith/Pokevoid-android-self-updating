@@ -67,3 +67,9 @@ test('save snapshots and migrations share the same queue as prompt writes across
   assert.ok(chrome.includes('NativeSaveQueue.execute('));
   assert.equal((shared.match(/NativeSaveQueue.execute/g)||[]).length,3);
 });
+
+test('startup cleans orphaned save transactions on the shared writer queue',()=>{
+  const shared=fs.readFileSync('native/SharedStoragePlugin.java','utf8');
+  assert.ok(shared.includes('NativeSaveQueue.cleanTemporarySaves(dir)'));
+  assert.ok(shared.indexOf('NativeSaveQueue.execute')<shared.indexOf('NativeSaveQueue.cleanTemporarySaves'));
+});

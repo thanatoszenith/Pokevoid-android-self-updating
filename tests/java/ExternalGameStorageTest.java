@@ -102,6 +102,12 @@ public final class ExternalGameStorageTest {
             c.stage(archive,sha(archive),"2"); c.activate(sha(archive));
             new File(committed,".pending").renameTo(new File(committed,".confirmed")); c.recover();
             check(c.version().equals("2") && !new File(committed,".previous").exists(),"crash during committed cleanup");
+            File saves = new File(base,"saves"); saves.mkdirs();
+            marker(saves,".pokevoid-interrupted.tmp","uncommitted");
+            marker(saves,"user.tmp","keep"); marker(saves,"committed.json","keep");
+            NativeSaveQueue.cleanTemporarySaves(saves);
+            check(!new File(saves,".pokevoid-interrupted.tmp").exists(),"orphan save transaction removed");
+            check(new File(saves,"user.tmp").exists() && new File(saves,"committed.json").exists(),"save records and user files preserved");
             File cache = new File(base,"cache"); cache.mkdirs();
             File old = new File(cache,"a".repeat(64)+".part"); marker(cache,old.getName(),"old");
             old.setLastModified(System.currentTimeMillis()-DownloadCache.MAX_AGE_MS-1000);

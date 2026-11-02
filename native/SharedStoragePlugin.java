@@ -96,7 +96,9 @@ public class SharedStoragePlugin extends Plugin {
         NativeSaveQueue.execute(() -> {
             try {
                 JSONArray entries = new JSONArray();
-                File[] files = savesDir().listFiles((dir, name) -> name.matches("[a-f0-9]{64}\\.json"));
+                File dir = savesDir();
+                NativeSaveQueue.cleanTemporarySaves(dir);
+                File[] files = dir.listFiles((dir, name) -> name.matches("[a-f0-9]{64}\\.json"));
                 if (files == null) throw new IOException("Cannot list saves");
                 for (File file : files) {
                     JSONObject record = readRecord(file);

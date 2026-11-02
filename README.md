@@ -97,3 +97,6 @@ Installer and downloader queues are shared across Android Activity recreation.
 Old UI callbacks are discarded after destruction, while filesystem operations
 finish in order. Reference-counted archive leases keep cache cleanup from deleting
 a download or extraction still in progress.
+
+Startup also removes unfinished app-owned save transaction files on the shared
+writer queue. Committed save records and unrelated user files are preserved.
