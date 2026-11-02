@@ -34,7 +34,7 @@ test('native save transport is frame-origin checked and does not expose a raw Ja
   const direct=fs.readFileSync('native/DirectSaveBridge.java','utf8');
   assert.doesNotMatch(loader,/addJavascriptInterface/);assert.doesNotMatch(direct,/@JavascriptInterface/);
   assert.ok(chrome.includes('TrustedGameOrigin.accepts(url)'));
-  assert.ok(chrome.includes('writer.execute('));assert.ok(chrome.includes('result.confirm(error)'));
+  assert.ok(chrome.includes('NativeSaveQueue.execute('));assert.ok(chrome.includes('result.confirm(error)'));
   const workflow=fs.readFileSync('.github/workflows/build.yml','utf8');
   assert.ok(workflow.indexOf('super.onCreate(savedInstanceState)')<workflow.indexOf('saveClient = new NativeSaveChromeClient'));
   assert.ok(workflow.includes('saveClient.close()'));
@@ -49,4 +49,21 @@ test('all launches have a readiness timeout and reuse the validated base directo
 test('save compatibility is injected before either old or new game scripts run',()=>{
   const loader=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
   assert.ok(loader.includes('getBridge().injectScriptBeforeLoad("save-compat.js")'));
+});
+
+test('activity recreation shares installer queues and cleanup protects in-use archives',()=>{
+  const loader=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
+  const downloader=fs.readFileSync('native/ResumableDownloadPlugin.java','utf8');
+  assert.ok(loader.includes('static final ExecutorService worker'));
+  assert.ok(loader.includes('if (!destroyed) action.run()'));
+  assert.ok(loader.includes('DownloadCache.hold(archive)'));
+  assert.ok(downloader.includes('static final AtomicInteger activeDownloads'));
+  assert.doesNotMatch(loader,/worker.shutdown/);assert.doesNotMatch(downloader,/executor.shutdown/);
+});
+
+test('save snapshots and migrations share the same queue as prompt writes across activity recreation',()=>{
+  const chrome=fs.readFileSync('native/NativeSaveChromeClient.java','utf8');
+  const shared=fs.readFileSync('native/SharedStoragePlugin.java','utf8');
+  assert.ok(chrome.includes('NativeSaveQueue.execute('));
+  assert.equal((shared.match(/NativeSaveQueue.execute/g)||[]).length,3);
 });

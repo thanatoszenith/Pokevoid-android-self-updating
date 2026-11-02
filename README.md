@@ -48,7 +48,8 @@ values are preserved once under external `data_backup_pre_external_*` records.
 External permission loss blocks saves instead of silently writing an internal copy.
 
 Downloader cleanup retains at most one owned archive/partial, no more than 4 GiB
-and no older than 48 hours at cleanup. It runs at startup, before downloads and after
+and no older than 48 hours at cleanup. In-use download or extraction files are
+protected until their operations finish. It runs at startup, before downloads and after
 confirmed launch. Unrelated files are preserved. WebView HTTP caching is disabled;
 CacheStorage and service worker registrations are cleared before native gameplay,
 and new asset-cache registration is disabled. The official daily cache remains one
@@ -91,3 +92,8 @@ for recovery. Each update check reads native state once, asset requests reuse th
 validated base directory, and known-short download retries avoid rereading the
 entire partial ZIP for SHA-256. A checksum already verified on a completed partial
 is reused through finalization.
+
+Installer and downloader queues are shared across Android Activity recreation.
+Old UI callbacks are discarded after destruction, while filesystem operations
+finish in order. Reference-counted archive leases keep cache cleanup from deleting
+a download or extraction still in progress.

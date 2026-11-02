@@ -17,8 +17,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @CapacitorPlugin(name = "ResumableDownload")
 public class ResumableDownloadPlugin extends Plugin {
-    private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final AtomicInteger activeDownloads = new AtomicInteger();
+    private static final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
+    private static final AtomicInteger activeDownloads = new AtomicInteger();
 
     @PluginMethod
     public void download(PluginCall call) {
@@ -40,24 +40,28 @@ public class ResumableDownloadPlugin extends Plugin {
                 File dir = new File(getContext().getFilesDir(), "resumable-bundles");
                 if (!dir.exists() && !dir.mkdirs()) throw new IOException("Cannot create download directory");
                 String key = sha.toLowerCase(Locale.ROOT);
-                DownloadCache.clean(dir, key);
                 File partial = new File(dir, key + ".part"), complete = new File(dir, key + ".zip");
-                boolean verifiedComplete = complete.exists() && matches(complete, key);
-                if (verifiedComplete) sendProgress(complete.length(), complete.length());
-                if (!verifiedComplete) {
-                    if (complete.exists() && !complete.delete()) throw new IOException("Cannot replace corrupt cached archive");
-                    if (!fetch(source, partial, key) && !matches(partial, key)) {
-                        partial.delete();
-                        throw new IOException("Downloaded ZIP checksum mismatch");
+                DownloadCache.clean(dir, key);
+                try (DownloadCache.Lease partialLease = DownloadCache.hold(partial);
+                     DownloadCache.Lease completeLease = DownloadCache.hold(complete)) {
+                    boolean verifiedComplete = complete.exists() && matches(complete, key);
+                    if (verifiedComplete) sendProgress(complete.length(), complete.length());
+                    if (verifiedComplete && partial.exists() && !partial.delete()) throw new IOException("Cannot remove redundant partial archive");
+                    if (!verifiedComplete) {
+                        if (complete.exists() && !complete.delete()) throw new IOException("Cannot replace corrupt cached archive");
+                        if (!fetch(source, partial, key) && !matches(partial, key)) {
+                            partial.delete();
+                            throw new IOException("Downloaded ZIP checksum mismatch");
+                        }
+                        if (!partial.renameTo(complete)) throw new IOException("Cannot finalize verified ZIP");
                     }
-                    if (!partial.renameTo(complete)) throw new IOException("Cannot finalize verified ZIP");
+                    // Do not duplicate the large archive in shared storage. The external
+                    // installer will extract verified assets directly into PokeVoid/Game.
+                    JSObject result = new JSObject();
+                    result.put("bytes", complete.length());
+                    result.put("checksum", key);
+                    call.resolve(result);
                 }
-                // Do not duplicate the large archive in shared storage. The external
-                // installer will extract verified assets directly into PokeVoid/Game.
-                JSObject result = new JSObject();
-                result.put("bytes", complete.length());
-                result.put("checksum", key);
-                call.resolve(result);
             } catch (Exception error) { call.reject("Resumable download failed", error); }
             finally {
                 if (activeDownloads.decrementAndGet() == 0)
@@ -79,6 +83,7 @@ public class ResumableDownloadPlugin extends Plugin {
             try {
                 File dir = new File(getContext().getFilesDir(), "resumable-bundles");
                 File archive = new File(dir, sha.toLowerCase(Locale.ROOT) + ".zip");
+                if (DownloadCache.inUse(archive)) throw new IOException("Archive is still in use");
                 if (archive.exists() && !archive.delete()) throw new IOException("Could not remove imported archive");
                 File partial = new File(dir, sha.toLowerCase(Locale.ROOT) + ".part");
                 if (partial.exists() && !partial.delete()) throw new IOException("Could not remove obsolete partial archive");
@@ -242,5 +247,5 @@ public class ResumableDownloadPlugin extends Plugin {
         return ExternalGameStorage.matches(file, checksum);
     }
 
-    @Override protected void handleOnDestroy() { executor.shutdown(); }
+    // Process-wide serial queue survives Activity recreation; no Activity is retained when idle.
 }

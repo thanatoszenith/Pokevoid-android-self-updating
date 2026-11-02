@@ -13,8 +13,9 @@ import java.util.concurrent.*;
 /** Uses Capacitor's WebView file host at the stable https://localhost origin. No private asset copy. */
 @CapacitorPlugin(name = "ExternalGame")
 public class ExternalGamePlugin extends Plugin {
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private static final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private volatile boolean destroyed;
     private volatile boolean launched;
     private volatile File activeBase;
     private volatile boolean loadFailed;
@@ -26,17 +27,20 @@ public class ExternalGamePlugin extends Plugin {
             throw new IOException("Enable All files access to use PokeVoid/Game");
         return new ExternalGameStorage(new File(Environment.getExternalStorageDirectory(), "PokeVoid/Game"));
     }
+    private void onUi(Runnable action) {
+        ui.post(() -> { if (!destroyed) action.run(); });
+    }
     interface Action { void run() throws Exception; }
     private void execute(PluginCall call, Action action) {
         try {
             worker.execute(() -> {
-                try { action.run(); } catch (Exception e) { call.reject(e.getMessage(), e); }
+                try { if (destroyed) throw new IOException("Activity is closing"); action.run(); } catch (Exception e) { call.reject(e.getMessage(), e); }
             });
         } catch (RejectedExecutionException stopped) { call.reject("Activity is closing", stopped); }
     }
     @Override public void load() {
         getBridge().injectScriptBeforeLoad("save-compat.js");
-        ui.post(() -> {
+        onUi(() -> {
             getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -86,7 +90,10 @@ public class ExternalGamePlugin extends Plugin {
             String sha = call.getString("checksum");
             if (sha == null || !sha.matches("[a-fA-F0-9]{64}")) throw new IOException("Invalid checksum");
             File archive = new File(new File(getContext().getFilesDir(), "resumable-bundles"), sha.toLowerCase(java.util.Locale.ROOT) + ".zip");
-            storage().stage(archive, sha, call.getString("version")); call.resolve();
+            try (DownloadCache.Lease lease = DownloadCache.hold(archive)) {
+                storage().stage(archive, sha, call.getString("version"));
+            }
+            call.resolve();
         });
     }
     @PluginMethod public void activate(PluginCall call) {
@@ -101,7 +108,7 @@ public class ExternalGamePlugin extends Plugin {
             File base = s.current().getCanonicalFile();
             waiting = true;
             launchId = java.util.UUID.randomUUID().toString();
-            ui.post(() -> {
+            onUi(() -> {
                 getBridge().getWebView().stopLoading();
                 getBridge().getWebView().clearCache(true);
                 ui.removeCallbacks(timeout);
@@ -114,11 +121,11 @@ public class ExternalGamePlugin extends Plugin {
     }
     @PluginMethod public void abortLaunch(PluginCall call) {
         launched = false; waiting = false; ui.removeCallbacks(timeout);
-        ui.post(() -> {
+        onUi(() -> {
             getBridge().getWebView().stopLoading();
             execute(call, () -> {
                 storage().recover();
-                ui.post(() -> { getBridge().getWebView().clearCache(true); getBridge().setServerAssetPath("public"); });
+                onUi(() -> { getBridge().getWebView().clearCache(true); getBridge().setServerAssetPath("public"); });
                 call.resolve();
             });
         });
@@ -146,15 +153,15 @@ public class ExternalGamePlugin extends Plugin {
     private void rollback() {
         if (!launched) return;
         launched = false; loadFailed = true; waiting = false; ui.removeCallbacks(timeout);
-        ui.post(() -> {
+        onUi(() -> {
             getBridge().getWebView().stopLoading();
             worker.execute(() -> {
                 try { storage().recover(); } catch (Exception e) { android.util.Log.e("PokeVoid", "Recovery failed", e); }
-                ui.post(() -> { getBridge().getWebView().clearCache(true); getBridge().setServerAssetPath("public"); });
+                onUi(() -> { getBridge().getWebView().clearCache(true); getBridge().setServerAssetPath("public"); });
             });
         });
     }
     @Override protected void handleOnPause() { ui.removeCallbacks(timeout); }
     @Override protected void handleOnResume() { if (waiting) ui.postDelayed(timeout, 180000); }
-    @Override protected void handleOnDestroy() { ui.removeCallbacks(timeout); worker.shutdown(); }
+    @Override protected void handleOnDestroy() { destroyed = true; ui.removeCallbacksAndMessages(null); }
 }

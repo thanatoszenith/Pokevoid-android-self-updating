@@ -30,6 +30,19 @@ public final class ExternalGameStorageTest {
     public static void main(String[] args) throws Exception {
         File base = Files.createTempDirectory("pokevoid-storage-").toFile();
         try {
+            java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch allowWrite = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CompletableFuture<Integer> snapshot = new java.util.concurrent.CompletableFuture<>();
+            java.util.concurrent.atomic.AtomicInteger saved = new java.util.concurrent.atomic.AtomicInteger();
+            NativeSaveQueue.execute(() -> {
+                started.countDown();
+                try { allowWrite.await(); } catch (InterruptedException e) { throw new RuntimeException(e); }
+                saved.set(7);
+            });
+            check(started.await(5,java.util.concurrent.TimeUnit.SECONDS),"writer started");
+            NativeSaveQueue.execute(() -> snapshot.complete(saved.get()));
+            allowWrite.countDown();
+            check(snapshot.get(5,java.util.concurrent.TimeUnit.SECONDS)==7,"recreated activity snapshot follows prior save");
             check(TrustedGameOrigin.accepts("https://localhost/"),"local origin accepted");
             check(TrustedGameOrigin.accepts("https://localhost:443/path"),"default secure port accepted");
             for (String url : new String[]{null,"http://localhost/","https://localhost.evil/","https://evil@localhost/","https://localhost:444/","file:///x","https://evil/","not a url"})
@@ -93,6 +106,15 @@ public final class ExternalGameStorageTest {
             File old = new File(cache,"a".repeat(64)+".part"); marker(cache,old.getName(),"old");
             old.setLastModified(System.currentTimeMillis()-DownloadCache.MAX_AGE_MS-1000);
             marker(cache,"b".repeat(64)+".zip","new"); marker(cache,"c".repeat(64)+".part","new"); marker(cache,"user.zip","keep");
+            try (DownloadCache.Lease lease = DownloadCache.hold(old)) {
+                DownloadCache.clean(cache,"c".repeat(64));
+                check(old.exists(),"active download survives concurrent cache cleanup");
+                try (DownloadCache.Lease second = DownloadCache.hold(old)) {
+                    lease.close();
+                    DownloadCache.clean(cache,"c".repeat(64));
+                    check(old.exists(),"nested extraction lease remains valid");
+                }
+            }
             DownloadCache.clean(cache,"c".repeat(64));
             check(cache.list().length==2,"only requested archive and user file retained");
             DownloadCache.clean(cache,"");

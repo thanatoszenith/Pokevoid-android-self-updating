@@ -93,57 +93,63 @@ public class SharedStoragePlugin extends Plugin {
 
     @PluginMethod
     public void readSaves(PluginCall call) {
-        try {
-            JSONArray entries = new JSONArray();
-            File[] files = savesDir().listFiles((dir, name) -> name.matches("[a-f0-9]{64}\\.json"));
-            if (files == null) throw new IOException("Cannot list saves");
-            for (File file : files) {
-                JSONObject record = readRecord(file);
-                String key = record.getString("key");
-                if (!filename(key).equals(file.getName())) throw new IOException("Invalid save filename");
-                entries.put(record);
-            }
-            JSObject result = new JSObject();
-            result.put("entries", entries);
-            call.resolve(result);
-        } catch (Exception error) { call.reject("Cannot read external saves", error); }
+        NativeSaveQueue.execute(() -> {
+            try {
+                JSONArray entries = new JSONArray();
+                File[] files = savesDir().listFiles((dir, name) -> name.matches("[a-f0-9]{64}\\.json"));
+                if (files == null) throw new IOException("Cannot list saves");
+                for (File file : files) {
+                    JSONObject record = readRecord(file);
+                    String key = record.getString("key");
+                    if (!filename(key).equals(file.getName())) throw new IOException("Invalid save filename");
+                    entries.put(record);
+                }
+                JSObject result = new JSObject();
+                result.put("entries", entries);
+                call.resolve(result);
+            } catch (Exception error) { call.reject("Cannot read external saves", error); }
+        });
     }
 
     @PluginMethod
     public void writeSave(PluginCall call) {
-        String key = call.getString("key"), value = call.getString("value");
-        if (key == null || value == null || key.length() > 512 || value.length() > 16 * 1024 * 1024) {
-            call.reject("Invalid save record"); return;
-        }
-        try {
-            File dir = savesDir();
-            File dest = new File(dir, filename(key));
-            File temp = File.createTempFile(".pokevoid-", ".tmp", dir);
+        NativeSaveQueue.execute(() -> {
+            String key = call.getString("key"), value = call.getString("value");
+            if (key == null || value == null || key.length() > 512 || value.length() > 16 * 1024 * 1024) {
+                call.reject("Invalid save record"); return;
+            }
             try {
-                JSONObject record = new JSONObject();
-                record.put("key", key);
-                record.put("value", value);
-                byte[] data = record.toString().getBytes(StandardCharsets.UTF_8);
-                if (data.length > 32 * 1024 * 1024) throw new IOException("Encoded save exceeds limit");
-                try (FileOutputStream out = new FileOutputStream(temp)) {
-                    out.write(data);
-                    out.getFD().sync();
-                }
-                if (!temp.renameTo(dest)) throw new IOException("Cannot atomically save record");
-            } finally { if (temp.exists()) temp.delete(); }
-            call.resolve();
-        } catch (Exception error) { call.reject("External save write failed", error); }
+                File dir = savesDir();
+                File dest = new File(dir, filename(key));
+                File temp = File.createTempFile(".pokevoid-", ".tmp", dir);
+                try {
+                    JSONObject record = new JSONObject();
+                    record.put("key", key);
+                    record.put("value", value);
+                    byte[] data = record.toString().getBytes(StandardCharsets.UTF_8);
+                    if (data.length > 32 * 1024 * 1024) throw new IOException("Encoded save exceeds limit");
+                    try (FileOutputStream out = new FileOutputStream(temp)) {
+                        out.write(data);
+                        out.getFD().sync();
+                    }
+                    if (!temp.renameTo(dest)) throw new IOException("Cannot atomically save record");
+                } finally { if (temp.exists()) temp.delete(); }
+                call.resolve();
+            } catch (Exception error) { call.reject("External save write failed", error); }
+        });
     }
 
     @PluginMethod
     public void deleteSave(PluginCall call) {
-        String key = call.getString("key");
-        if (key == null || key.length() > 512) { call.reject("Invalid save key"); return; }
-        try {
-            File dest = new File(savesDir(), filename(key));
-            if (dest.exists() && !dest.delete()) throw new IOException("Cannot delete save");
-            call.resolve();
-        } catch (Exception error) { call.reject("External save delete failed", error); }
+        NativeSaveQueue.execute(() -> {
+            String key = call.getString("key");
+            if (key == null || key.length() > 512) { call.reject("Invalid save key"); return; }
+            try {
+                File dest = new File(savesDir(), filename(key));
+                if (dest.exists() && !dest.delete()) throw new IOException("Cannot delete save");
+                call.resolve();
+            } catch (Exception error) { call.reject("External save delete failed", error); }
+        });
     }
 
 }

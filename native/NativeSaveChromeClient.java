@@ -11,7 +11,6 @@ import org.json.JSONObject;
 
 /** Install during Activity.onCreate, before ActivityResult registration closes. */
 public final class NativeSaveChromeClient extends BridgeWebChromeClient {
-    private final ExecutorService writer = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean closed;
     private final DirectSaveBridge saves = new DirectSaveBridge();
@@ -22,7 +21,7 @@ public final class NativeSaveChromeClient extends BridgeWebChromeClient {
         if (!TrustedGameOrigin.accepts(url)) { result.confirm("Untrusted save origin"); return true; }
         if (closed) { result.cancel(); return true; }
         try {
-            writer.execute(() -> {
+            NativeSaveQueue.execute(() -> {
                 String error = command(payload);
                 ui.post(() -> { if (closed) result.cancel(); else result.confirm(error); });
             });
@@ -30,7 +29,7 @@ public final class NativeSaveChromeClient extends BridgeWebChromeClient {
         return true;
     }
 
-    public void close() { closed = true; writer.shutdown(); }
+    public void close() { closed = true; }
 
     private String command(String payload) {
         String error;
