@@ -103,3 +103,14 @@ test('oversized HTTP range integers do not terminate the loopback response silen
 test('game update progress listener cleanup cannot invalidate a successful import', () => {
   assert.match(gate, /listener\.remove\(\)\.catch\(/);
 });
+
+test('both download interfaces report measured speed, percent, remaining bytes and ETA', () => {
+  assert.match(bootstrap, /percent\.toFixed\(1\)/);
+  assert.match(bootstrap, /lastTotal - done/);
+  assert.match(bootstrap, /remaining \/ smoothedSpeed/);
+  assert.match(bootstrap, /showProgress\(event\.downloaded, event\.total\)/);
+  assert.match(gate, /percent\.toFixed\(1\)/);
+  assert.match(gate, /total - downloaded/);
+  assert.match(gate, /remaining \/ speed/);
+  assert.match(gate, /report\(downloaded, total\)/);
+});
