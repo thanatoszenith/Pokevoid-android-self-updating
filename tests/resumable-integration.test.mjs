@@ -240,3 +240,11 @@ test('previously approved interrupted game updates resume on the next launch', (
   assert.match(gate, /localStorage\.setItem\(RESUME_KEY/);
   assert.match(gate, /localStorage\.removeItem\(RESUME_KEY\)/);
 });
+
+test('background progress notifications are throttled and permission failures are nonfatal', () => {
+  const service = fs.readFileSync('native/DownloadForegroundService.java', 'utf8');
+  assert.match(service, /SystemClock\.elapsedRealtime\(\)/);
+  assert.match(service, /now - lastNotificationMs < 1000L/);
+  assert.match(service, /catch \(SecurityException error\)/);
+  assert.match(native, /catch \(IOException \| SecurityException error\)/);
+});
