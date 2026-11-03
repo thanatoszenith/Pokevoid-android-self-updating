@@ -1,7 +1,15 @@
-name: Monitor upstream PokéVoid updates
+name: Monitor and automatically publish PokéVoid game updates
 on:
   schedule:
     - cron: '17 6 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/monitor-upstream.yml'
+      - '.github/workflows/publish-game.yml'
+      - 'patches/**'
+      - 'scripts/monitor-game-feed.mjs'
+      - 'scripts/create-manifest.mjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,7 +21,8 @@ jobs:
   check-upstream:
     runs-on: ubuntu-latest
     steps:
-      - name: Compare upstream HEAD with published game
+      - uses: actions/checkout@v4
+      - name: Compare upstream game, Android patches and public feed
         env:
           GH_TOKEN: ${{ github.token }}
           UPDATE_FEED: https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json
@@ -22,24 +31,54 @@ jobs:
           set -euo pipefail
           UPSTREAM_SHA="$(gh api repos/smittynugget/pokevoid/commits/HEAD --jq .sha)"
           [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
+          PATCHES_SHA="$(git rev-parse HEAD:patches)"
+          [[ "$PATCHES_SHA" =~ ^[0-9a-f]{40}$ ]]
           echo "Latest upstream: $UPSTREAM_SHA"
-          curl --fail --location --silent --show-error --retry 3 "$UPDATE_FEED" -o published.json
-          PUBLISHED_SHA="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("published.json","utf8"));console.log(d.upstreamCommit||"")')"
-          echo "Published upstream: ${PUBLISHED_SHA:-unknown}"
-          if [[ "$PUBLISHED_SHA" == "$UPSTREAM_SHA" ]]; then
-            echo "No new upstream commit; nothing to publish."
+          echo "Current Android game patches: $PATCHES_SHA"
+
+          # HTTP 404 represents an uninitialized feed, not a permanent failure.
+          # Other HTTP/network errors must not cause a speculative publication.
+          CODE="$(curl --location --silent --show-error --retry 3 --connect-timeout 20 --max-time 45 -o published.json -w '%{http_code}' "$UPDATE_FEED")"
+          if [[ "$CODE" == "404" ]]; then
+            FEED_FILE="-"
+            PUBLISHED_SHA=""
+          elif [[ "$CODE" == "200" ]]; then
+            FEED_FILE="published.json"
+            PUBLISHED_SHA="$(node -e 'const d=require("./published.json");console.log(d.upstreamCommit||"")')"
+          else
+            echo "Cannot verify public update feed (HTTP $CODE)" >&2
+            exit 1
+          fi
+
+          DECISION="$(node scripts/monitor-game-feed.mjs "$FEED_FILE" "$UPSTREAM_SHA" "$PATCHES_SHA")"
+          if [[ "$DECISION" == "skip" ]]; then
+            echo "Published game already matches upstream, patches and required capabilities."
             exit 0
           fi
-          # Confirm the published commit is an ancestor before publishing a newer build.
-          if [[ "$PUBLISHED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          [[ "$DECISION" == "publish" ]]
+
+          # Only auto-publish fast-forward upstream changes; reject rewritten history.
+          if [[ "$PUBLISHED_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$PUBLISHED_SHA" != "$UPSTREAM_SHA" ]]; then
             git init -q upstream-check
             git -C upstream-check remote add origin https://github.com/smittynugget/pokevoid.git
             git -C upstream-check fetch -q --depth=100 origin "$UPSTREAM_SHA"
             if ! git -C upstream-check cat-file -e "$PUBLISHED_SHA^{commit}" 2>/dev/null; then
               git -C upstream-check fetch -q origin "$PUBLISHED_SHA"
             fi
-            git -C upstream-check merge-base --is-ancestor "$PUBLISHED_SHA" "$UPSTREAM_SHA" || { echo "Published commit is not an ancestor of upstream HEAD; refusing automatic update."; exit 1; }
+            git -C upstream-check merge-base --is-ancestor "$PUBLISHED_SHA" "$UPSTREAM_SHA" || {
+              echo "Published upstream commit is not an ancestor of HEAD; refusing automatic update." >&2
+              exit 1
+            }
           fi
+
+          # Avoid publishing two huge archives concurrently when a push and daily
+          # monitor both notice the same change before the feed is deployed.
+          ACTIVE="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/publish-game.yml/runs?per_page=20" --jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "requested" or .status == "pending")] | length')"
+          if [[ "$ACTIVE" != "0" ]]; then
+            echo "A game publication is already active; the next scheduled check will verify it."
+            exit 0
+          fi
+
           VERSION="$(date -u +%Y%m%d.%H%M%S)"
-          echo "Publishing upstream $UPSTREAM_SHA as game version $VERSION"
+          echo "Automatically publishing upstream $UPSTREAM_SHA and patches $PATCHES_SHA as $VERSION"
           gh workflow run publish-game.yml --repo "$GITHUB_REPOSITORY" --ref main -f version="$VERSION" -f upstream_ref="$UPSTREAM_SHA" -f publish=true
