@@ -83,13 +83,17 @@ test('download and install paths use external archives exclusively',()=>{
   assert.doesNotMatch(installer,/new File\(getContext\(\).getFilesDir/);
   assert.ok(installer.includes('DownloadCache.release(downloads, sha)'));
 });
-test('internal cleanup excludes profiles and runs even before a first external installation',()=>{
+test('internal cleanup is delayed until the game launches and cannot block native relaunch',()=>{
   const installer=fs.readFileSync('native/ExternalGamePlugin.java','utf8');
   const cleanup=fs.readFileSync('native/StorageMaintenance.java','utf8');
-  assert.ok(installer.includes('worker.execute(this::cleanInternalStorage)'));
+  assert.ok(installer.includes('private static final ExecutorService maintenance'));
+  assert.ok(installer.includes('maintenance.execute('));
+  assert.ok(installer.includes('scheduleInternalCleanup();'));
+  assert.ok(installer.indexOf('storage().confirm();') < installer.indexOf('scheduleInternalCleanup();'));
+  assert.doesNotMatch(installer,/worker.execute\(this::cleanInternalStorage\)/);
+  assert.ok(installer.includes('storage().recoverForLaunch()'));
+  assert.ok(installer.includes('WebSettings.LOAD_NO_CACHE'));
   assert.doesNotMatch(cleanup,/deleteAllData|app_webview/);
-  assert.ok(installer.includes('handleOnPause()'));
-  assert.ok((installer.match(/clearCache\(true\)/g)||[]).length>=4);
 });
 test('native HTTPS downloads do not use an internal response cache',()=>{
   const downloader=fs.readFileSync('native/ResumableDownloadPlugin.java','utf8');
