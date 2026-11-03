@@ -128,6 +128,15 @@ public final class ExternalGameStorage {
         removeTree(file(".previous")); removeTree(file(".confirmed"));
     }
     public synchronized void recover() throws IOException {
+        recoverInternal(true);
+    }
+    /** Restore activation journals without walking a potentially huge abandoned ZIP extraction.
+     * The next stage replaces .staging, while post-launch maintenance prunes it.
+     */
+    public synchronized void recoverForLaunch() throws IOException {
+        recoverInternal(false);
+    }
+    private void recoverInternal(boolean pruneStaging) throws IOException {
         ensureRoot();
         File previous = file(".previous");
         if (file(".confirmed").exists()) { removeTree(previous); removeTree(file(".confirmed")); }
@@ -152,7 +161,7 @@ public final class ExternalGameStorage {
                 if (!previous.renameTo(current())) throw new IOException("Cannot restore previous game");
             }
         }
-        removeTree(file(".staging"));
+        if (pruneStaging) removeTree(file(".staging"));
     }
     public static void removeTree(File target) throws IOException {
         if (!target.exists() && !Files.isSymbolicLink(target.toPath())) return;
