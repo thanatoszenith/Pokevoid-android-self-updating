@@ -12,6 +12,13 @@ import java.util.concurrent.*;
 @CapacitorPlugin(name = "ExternalGame")
 public class ExternalGamePlugin extends Plugin {
     private static final ExecutorService worker = Executors.newSingleThreadExecutor();
+    // Retired internal bundles can contain gigabytes of files. Never place their
+    // deletion ahead of status/recovery/open on the launch-critical worker queue.
+    private static final ExecutorService maintenance = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "pokevoid-storage-maintenance");
+        thread.setPriority(Thread.MIN_PRIORITY);
+        return thread;
+    });
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean destroyed;
     private volatile boolean launched;
@@ -21,9 +28,14 @@ public class ExternalGamePlugin extends Plugin {
     private volatile String launchId = "";
     private final Runnable timeout = () -> { if (waiting) rollback(); };
     private ExternalGameStorage storage() throws IOException { return ExternalGamePaths.storage(); }
-    private void cleanInternalStorage() {
-        try { StorageMaintenance.removeRetiredInternal(getContext().getFilesDir(), getContext().getCacheDir()); }
-        catch (IOException error) { android.util.Log.w("PokeVoid", "Internal asset cleanup will retry", error); }
+    private void scheduleInternalCleanup() {
+        // Capture application-scoped paths: this Activity may disappear while cleanup runs.
+        File files = getContext().getApplicationContext().getFilesDir();
+        File cache = getContext().getApplicationContext().getCacheDir();
+        maintenance.execute(() -> {
+            try { StorageMaintenance.removeRetiredInternal(files, cache); }
+            catch (IOException error) { android.util.Log.w("PokeVoid", "Internal asset cleanup will retry", error); }
+        });
     }
     private void onUi(Runnable action) {
         ui.post(() -> { if (!destroyed) action.run(); });
@@ -38,10 +50,9 @@ public class ExternalGamePlugin extends Plugin {
     }
     @Override public void load() {
         getBridge().injectScriptBeforeLoad("save-compat.js");
-        worker.execute(this::cleanInternalStorage);
         onUi(() -> {
             getBridge().getWebView().getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
-            getBridge().getWebView().clearCache(true);
+            // Avoid synchronous WebView cache purging on the critical startup path.
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     if (launched && "localhost".equals(request.getUrl().getHost())) {
@@ -81,7 +92,7 @@ public class ExternalGamePlugin extends Plugin {
     @PluginMethod public void recover(PluginCall call) {
         execute(call, () -> {
             if (launched) throw new IOException("Cannot recover a running game");
-            storage().recover(); DownloadCache.clean(storage().downloads(), null);
+            storage().recoverForLaunch(); DownloadCache.clean(storage().downloads(), null);
             call.resolve(state());
         });
     }
@@ -117,7 +128,6 @@ public class ExternalGamePlugin extends Plugin {
             launchId = java.util.UUID.randomUUID().toString();
             onUi(() -> {
                 getBridge().getWebView().stopLoading();
-                getBridge().getWebView().clearCache(true);
                 ui.removeCallbacks(timeout);
                 activeBase = base; launched = true; loadFailed = false;
                 getBridge().setServerBasePath(base.getPath());
@@ -141,17 +151,28 @@ public class ExternalGamePlugin extends Plugin {
         execute(call, () -> {
             if (!launched || !launchId.equals(call.getString("launchId"))) throw new IOException("Stale launch confirmation");
             storage().confirm(); waiting = false; ui.removeCallbacks(timeout);
-            DownloadCache.clean(storage().downloads(), "");
-            cleanLegacyAssets();
+            // Confirmation is durable before best-effort maintenance starts.
             call.resolve();
+            scheduleInternalCleanup();
+            try {
+                DownloadCache.clean(storage().downloads(), "");
+                cleanLegacyAssets();
+            } catch (IOException error) {
+                android.util.Log.w("PokeVoid", "Post-launch cleanup will retry", error);
+            }
+            // WebView asset caching remains disabled; prune any older cache after
+            // the game has actually reached its title screen, not before opening.
+            onUi(() -> getBridge().getWebView().clearCache(true));
         });
     }
     private void cleanLegacyAssets() throws IOException {
         // Exact directories owned by the retired updater; never WebView data or saves.
-        cleanInternalStorage();
         File root = storage().current().getParentFile();
         File[] leftovers = root.listFiles((dir, name) -> name.matches("(\\.staging-[a-f0-9]{64}|pokevoid-[a-f0-9]{64}\\.zip)"));
         if (leftovers != null) for (File item : leftovers) ExternalGameStorage.removeTree(item);
+        // recoverForLaunch() deliberately leaves abandoned staging untouched
+        // so it cannot stall game startup; it is safe to prune after confirmation.
+        if (!storage().pending()) ExternalGameStorage.removeTree(new File(root, ".staging"));
         File releases = new File(root, "releases");
         File[] versions = releases.listFiles((dir, name) -> name.matches("[a-f0-9]{64}"));
         if (versions != null) for (File item : versions) ExternalGameStorage.removeTree(item);
@@ -169,7 +190,8 @@ public class ExternalGamePlugin extends Plugin {
     }
     @Override protected void handleOnPause() {
         ui.removeCallbacks(timeout);
-        getBridge().getWebView().clearCache(true);
+        // LOAD_NO_CACHE prevents asset-cache growth. Clearing a very large
+        // WebView cache here could stall backgrounding or the next launch.
     }
     @Override protected void handleOnResume() { if (waiting) ui.postDelayed(timeout, 180000); }
     @Override protected void handleOnDestroy() { destroyed = true; ui.removeCallbacksAndMessages(null); }
