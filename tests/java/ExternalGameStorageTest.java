@@ -118,6 +118,18 @@ public final class ExternalGameStorageTest {
             File blocked = new File(base,"blocked"); ExternalGameStorage locked = oldGame(blocked);
             marker(blocked,".rollback","old"); fails(() -> locked.stage(archive,sha(archive),"2"));
             check(locked.version().equals("1"),"staging cannot overwrite an unresolved rollback");
+            // A crash during extraction can leave thousands of external assets in
+            // .staging. Cold launch must not synchronously walk that directory.
+            File fastRoot = new File(base,"fast-relaunch");
+            File abandoned = new File(fastRoot,".staging");
+            check(abandoned.mkdirs(),"create abandoned stage fixture");
+            marker(abandoned,"unconfirmed-asset","keep until idle maintenance");
+            ExternalGameStorage fastLaunch = new ExternalGameStorage(fastRoot);
+            fastLaunch.recoverForLaunch();
+            check(abandoned.exists(),"fast recovery defers costly orphan cleanup");
+            fastLaunch.recover();
+            check(!abandoned.exists(),"full maintenance still removes the orphan");
+
             File firstRoot = new File(base,"first"); ExternalGameStorage first = new ExternalGameStorage(firstRoot);
             first.stage(archive,sha(archive),"2"); first.activate(sha(archive)); first.recover(); first.recover();
             check(!first.installed(),"bad first install removed");
