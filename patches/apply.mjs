@@ -22,7 +22,7 @@ if (!main.includes(capacitorImport)) main = `${capacitorImport}\n${main}`;
 if (!main.includes(dailySyncImport)) main = `${dailySyncImport}\n${main}`;
 const bootLine = 'const boot = async (): Promise<void> => {';
 if (main.split(bootLine).length !== 2) throw new Error('Expected exactly one PokéVoid boot() entrypoint');
-main = main.replace(bootLine, `${bootLine}\n  if (Capacitor.isNativePlatform()) await clearNativeAssetCaches();\n  if (!(await updateBeforeGame())) return;\n  if (Capacitor.isNativePlatform()) { await initializeDirectSaves(); startOfficialDailySync(); }`);
+main = main.replace(bootLine, `${bootLine}\n  if (Capacitor.isNativePlatform()) void clearNativeAssetCaches().catch(error => console.warn('[NativeCache] Maintenance deferred', error));\n  if (!(await updateBeforeGame())) return;\n  if (Capacitor.isNativePlatform()) { await initializeDirectSaves(); startOfficialDailySync(); }`);
 if (!main.includes('await initializeDirectSaves(); startOfficialDailySync();')) throw new Error('Android daily sync startup hook missing');
 // Upstream notifies readiness after boot. Our update gate now handles this before the game starts.
 const legacyNotify = /if \(typeof \(window as any\)\.Capacitor !== "undefined"\) \{\s*import\("@capgo\/capacitor-updater"\)\.then\(\(\{ CapacitorUpdater \}\) => \{\s*CapacitorUpdater\.notifyAppReady\(\);\s*\}\)\.catch\(\(\) => \{\}\);\s*\}/;
