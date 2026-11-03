@@ -6,7 +6,7 @@ import { stripTypeScriptTypes } from 'node:module';
 
 const checksum = 'a'.repeat(64);
 const tick = () => new Promise(resolve => setImmediate(resolve));
-async function fixture({pending=true,failed=false,openFails=false,granted=true,grantOnRequest=true,externalFeature=true}={}) {
+async function fixture({pending=true,failed=false,openFails=false,granted=true,grantOnRequest=true,externalFeature=true,installed=false,cacheHangs=false}={}) {
   const calls=[];
   let storageGranted=granted, accessRequests=0, addedButtons=0;
   const nativeListeners=new Map();
@@ -16,19 +16,19 @@ async function fixture({pending=true,failed=false,openFails=false,granted=true,g
   const elements=new Map();
   const document={hidden:false,addEventListener(){},getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);},createElement:element,body:{append(){addedButtons++;}}};
   const ExternalGame={
-    recover:async()=>({installed:false}),status:async()=>({failedChecksum:failed?checksum:''}),
+    recover:async()=>({installed}),status:async()=>({failedChecksum:failed?checksum:''}),
     stage:async()=>calls.push('stage'),activate:async()=>calls.push('activate'),
     open:async()=>{calls.push('open');if(openFails)throw new Error('host unavailable');},
     abortLaunch:async()=>calls.push('abort'),
   };
   const source=fs.readFileSync('bootstrap/main.ts','utf8').replace(/^import .*;$/gm,'').replace("'__POKEVOID_UPDATE_FEED__'","'https://owner.github.io/repo/capacitor-update.json'");
-  const context=vm.createContext({console,URL,document,localStorage,Date,ExternalGame,window:{addEventListener(){}},Capacitor:{isNativePlatform:()=>true},
+  const context=vm.createContext({console,URL,document,localStorage,Date,setTimeout,clearTimeout,ExternalGame,window:{addEventListener(){}},Capacitor:{isNativePlatform:()=>true},
     SharedStorage:{
       status:async()=>({granted:storageGranted}),createFolders:async()=>{},
       requestAccess:async()=>{accessRequests++;storageGranted=grantOnRequest;return {granted:storageGranted};},
       addListener:async(name,callback)=>{nativeListeners.set(name,callback);return {remove:async()=>{}};}
     },
-    clearNativeAssetCaches:async()=>{},configureSharedStorage:async()=>{},
+    clearNativeAssetCaches:async()=>cacheHangs?new Promise(()=>{}):undefined,configureSharedStorage:async()=>{},
     readUpdateFeed:async()=>({version:'2',checksum,url:'https://github.com/owner/repo/releases/download/game-feed/pokevoid-game-2.zip',features:['offline-daily-v1','official-daily-cache-v1',...(externalFeature?['external-game-v1']:[])]}),
     ResumableDownload:{addListener:async()=>({remove:async()=>{}}),download:async()=>calls.push('download'),releaseArchive:async()=>calls.push('release')},
   });
@@ -75,4 +75,16 @@ test('the currently published legacy feed is diagnosed as outdated rather than a
   const x=await fixture({pending:false,externalFeature:false});
   assert.match(x.elements.get('status').textContent,/published game download is outdated/);
   assert.deepEqual(x.calls,[]);
+});
+
+test('an already-installed game reopens without waiting for a hung browser cache cleanup', async () => {
+  const x = await fixture({ pending: false, installed: true, cacheHangs: true });
+  assert.deepEqual(x.calls, ['open']);
+  assert.match(x.elements.get('status').textContent, /Opening external game/);
+  assert.equal(x.elements.get('install').disabled, true);
+});
+
+test('startup reports its current phase instead of leaving the initial download placeholder', async () => {
+  const x = await fixture({ pending: false, installed: true });
+  assert.notEqual(x.elements.get('status').textContent, 'Checking for game download…');
 });
