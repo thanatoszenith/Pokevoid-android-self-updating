@@ -25,10 +25,29 @@ concurrency:
 jobs:
   game:
     runs-on: ubuntu-latest
+    outputs:
+      normalized_version: ${{ steps.normalize.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           path: wrapper
+      # workflow_dispatch text fields may contain accidental surrounding whitespace.
+      # Validate the normalized value once and use it throughout both jobs.
+      - name: Normalize requested game version
+        id: normalize
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const version = (process.env.REQUESTED_VERSION ?? '').trim();
+          if (!/^\d+(?:\.\d+)*$/.test(version) || version.split('.').some(component => !Number.isSafeInteger(Number(component)))) {
+            console.error('Invalid game version: enter numeric dotted format such as 1.1.0');
+            process.exit(1);
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + version + '\n');
+          console.log('Publishing validated version ' + version);
+          NODE
       - name: Validate release destination before building
         if: ${{ inputs.publish }}
         env:
@@ -56,7 +75,7 @@ jobs:
         working-directory: game
         env:
           POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
-          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
         run: |
           test -n "$POKEVOID_UPDATE_FEED"
           node --check ../wrapper/patches/apply.mjs
@@ -71,7 +90,7 @@ jobs:
         working-directory: game
         env:
           POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
-          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
         run: |
           pnpm install --no-frozen-lockfile
           pnpm add -D --save-exact @capacitor/cli@7 @capacitor/android@7 @capacitor/core@7
@@ -101,7 +120,7 @@ jobs:
       - name: Generate release manifest
         if: ${{ inputs.publish }}
         env:
-          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
           POKEVOID_RELEASE_BASE_URL: ${{ vars.POKEVOID_RELEASE_BASE_URL || 'https://github.com/thanatoszenith/Pokevoid-android-self-updating/releases/download/game-feed/' }}
           POKEVOID_UPSTREAM_COMMIT: ${{ inputs.upstream_ref || '802a20fb8e75a873d9eaa79fc1f3febe7b420be7' }}
         run: node wrapper/scripts/create-manifest.mjs
@@ -115,7 +134,7 @@ jobs:
         if: ${{ inputs.publish }}
         env:
           POKEVOID_UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
-          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
           POKEVOID_ALLOW_FIRST_PUBLICATION: ${{ vars.POKEVOID_ALLOW_FIRST_PUBLICATION || 'true' }}
         run: node wrapper/scripts/check-release-order.mjs
 
@@ -123,7 +142,7 @@ jobs:
         if: ${{ inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
-          POKEVOID_VERSION: ${{ inputs.version || '1.0.0' }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
         run: |
           gh release view game-feed --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create game-feed --repo "$GITHUB_REPOSITORY" --title 'PokéVoid downloadable game' --notes 'Versioned game bundles.'
           # Never replace bytes already advertised under the same version.
@@ -136,7 +155,7 @@ jobs:
       - name: Verify release ZIP is publicly downloadable before advertising it
         if: ${{ inputs.publish }}
         env:
-          POKEVOID_VERSION: ${{ inputs.version }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
         run: |
           set -euo pipefail
           ASSET_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/game-feed/pokevoid-game-${POKEVOID_VERSION}.zip"
@@ -178,7 +197,7 @@ jobs:
       - name: Verify publicly served update feed
         env:
           UPDATE_FEED: ${{ vars.POKEVOID_UPDATE_FEED || 'https://thanatoszenith.github.io/Pokevoid-android-self-updating/capacitor-update.json' }}
-          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_VERSION: ${{ needs.game.outputs.normalized_version }}
         run: |
           set -euo pipefail
           for attempt in $(seq 1 12); do
