@@ -29,3 +29,12 @@ test('official daily sync initializes at game boot, not only on daily selection'
   assert.match(apply, /if \(Capacitor\.isNativePlatform\(\)\)/);
   assert.doesNotMatch(daily, /startOfficialDailySync\(\)/);
 });
+
+test('publication trims dispatch version and passes the same value into both publishing jobs', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/publish-game.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /\(process\.env\.REQUESTED_VERSION \?\? ''\)\.trim\(\)/);
+  assert.match(workflow, /normalized_version: \$\{\{ steps\.normalize\.outputs\.version \}\}/);
+  assert.match(workflow, /EXPECTED_VERSION: \$\{\{ needs\.game\.outputs\.normalized_version \}\}/);
+  assert.match(workflow, /POKEVOID_VERSION: \$\{\{ steps\.normalize\.outputs\.version \}\}/);
+  assert.doesNotMatch(workflow, /POKEVOID_VERSION: \$\{\{ inputs\.version/);
+});
