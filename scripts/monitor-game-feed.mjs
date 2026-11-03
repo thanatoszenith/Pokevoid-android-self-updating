@@ -15,13 +15,12 @@ export function publicationReasons(published, upstreamCommit, patchesRevision) {
   if (published === null) return ['Public update feed is missing'];
   if (!published || typeof published !== 'object' || Array.isArray(published)
       || typeof published.version !== 'string' || !/^\d+(?:\.\d+)*$/.test(published.version)
-      || !sha.test(published.upstreamCommit ?? '')
       || typeof published.url !== 'string' || !published.url.startsWith('https://')
       || !/^[0-9a-f]{64}$/i.test(published.checksum ?? ''))
     throw new Error('Existing update feed is malformed; refusing automatic publication');
 
   const reasons = [];
-  if (!requiredFeatures.every(feature => published.features?.includes?.(feature)))
+  if (!Array.isArray(published.features) || !requiredFeatures.every(feature => published.features.includes(feature)))
     reasons.push('Published bundle lacks required Android capabilities');
   if (published.upstreamCommit !== upstreamCommit)
     reasons.push('Upstream PokéVoid source changed');
