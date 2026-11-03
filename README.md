@@ -83,9 +83,21 @@ the matching external game ZIP as separate build artifacts.
 The game publication workflow builds an immutable versioned ZIP and then publishes
 the GitHub Pages feed. New feeds must declare `external-game-v1` along with both
 protected daily capabilities; older bundles using the private updater are rejected.
-Run **Publish PokéVoid game bundle (no APK)** with a new numeric dotted version and
-`publish=true` to make a matching bundle available to this launcher. Updating
-native loading requires installing the new APK as well as publishing the game ZIP.
+The **Monitor and automatically publish PokéVoid game updates** workflow runs daily
+and whenever Android game patches or publisher configuration change on `main`.
+It checks upstream PokéVoid HEAD, the published manifest's compatibility features,
+and the Git tree revision of `patches/`. When any of these change (or a compatible
+feed has never been published), it automatically dispatches the game publisher
+with a fresh immutable numeric version. No GitHub interaction is required after
+installing the launcher: on each game launch, it checks the published feed and
+offers to download/install a new external game bundle. Offline play continues
+without checking GitHub.
+
+**Publish PokéVoid game bundle (no APK)** can also be run manually to force a
+specific version or upstream commit. Updating Android-native wrapper code still
+requires installing an updated APK; downloadable game updates cannot replace
+native APK code. GitHub's scheduled workflows must remain enabled for daily
+upstream monitoring to continue.
 
 Run `node --test tests/*.test.mjs` with Node 22+, a JDK, Python with Pillow and unzip installed.
 Tests execute the real Java installer with malformed archives and simulated crashes,
