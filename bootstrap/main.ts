@@ -12,6 +12,17 @@ const button = document.getElementById('install') as HTMLButtonElement;
 const progressArea = document.getElementById('progress-area') as HTMLDivElement;
 const progressBar = document.getElementById('download-progress') as HTMLProgressElement;
 const progressDetails = document.getElementById('download-details') as HTMLDivElement;
+const STARTUP_NOTICE_MS = 12000;
+/** Keep an accurate phase visible even when a native filesystem recovery is slow. */
+async function reportStartup<T>(message: string, job: Promise<T>): Promise<T> {
+  status.textContent = message;
+  const timer = setTimeout(() => {
+    if (status.textContent === message)
+      status.textContent = message + ' This is taking longer than expected; existing game files and saves are being preserved.';
+  }, STARTUP_NOTICE_MS);
+  try { return await job; } finally { clearTimeout(timer); }
+}
+
 let lastSampleTime = 0;
 let lastSampleBytes = 0;
 let smoothedSpeed = 0;
@@ -147,9 +158,11 @@ async function ensureStorageAccess(): Promise<boolean> {
 async function main() {
   button.disabled = true;
   if (!Capacitor.isNativePlatform()) { status.textContent = 'Install this Android application to download the game.'; return; }
-  if (!(await ensureStorageAccess())) return;
-  await clearNativeAssetCaches();
-  if (await restoreInstalledGame()) {
+  if (!(await reportStartup('Checking PokeVoid folder access…', ensureStorageAccess()))) return;
+  // Browser cache maintenance is best-effort. Do not hold a perfectly good
+  // offline installation behind an unresponsive WebView storage API.
+  void clearNativeAssetCaches().catch(error => console.warn('[Bootstrap] Cache cleanup deferred', error));
+  if (await reportStartup('Checking installed game in PokeVoid/Game…', restoreInstalledGame())) {
     localStorage.removeItem(RESUME_KEY);
     return;
   }
