@@ -52,23 +52,33 @@ function showOverlay(): { message: (s: string) => void; remove: () => void } {
   el.setAttribute('role', 'status');
   Object.assign(el.style, { position: 'fixed', inset: '0', zIndex: '2147483647', background: '#10151f', color: '#fff', display: 'grid', placeItems: 'center', font: '18px system-ui', textAlign: 'center', padding: '24px' });
   document.body.append(el);
-  return { message: (s) => { el.textContent = s; }, remove: () => el.remove() };
+  const stopKeyInput = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
+  window.addEventListener('keydown', stopKeyInput, true);
+  window.addEventListener('keyup', stopKeyInput, true);
+  return { message: (s) => { el.textContent = s; }, remove: () => {
+    window.removeEventListener('keydown', stopKeyInput, true);
+    window.removeEventListener('keyup', stopKeyInput, true);
+    el.remove();
+  } };
 }
 
-/** Returns false when activation has started and Phaser must NOT boot in this document. */
-export async function updateBeforeGame(): Promise<boolean> {
-  if (!Capacitor.isNativePlatform()) return true;
+/** Called once after title composition and native launch confirmation.
+ * A slow/offline feed must never delay game initialization or the title screen.
+ * The update overlay blocks input while a user-approved update is being installed.
+ */
+export async function checkGameUpdates(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
 
   const state = await ExternalGame.status();
-  if (state.pending) return true;
+  if (state.pending) return;
   const release = await checkRelease(state);
-  if (!release) return true;
+  if (!release) return;
   let resume = false;
   try {
     const pending = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null');
     resume = pending?.version === release.version && pending?.checksum === release.checksum;
   } catch { localStorage.removeItem(RESUME_KEY); }
-  if (!resume && !window.confirm(`PokéVoid ${release.version} is available. Download and install before playing?`)) return true;
+  if (!resume && !window.confirm(`PokéVoid ${release.version} is available. Download and install now?`)) return;
   const overlay = showOverlay();
   let promoted = false;
   try {
@@ -114,15 +124,15 @@ export async function updateBeforeGame(): Promise<boolean> {
     promoted = true;
     await ExternalGame.open();
     localStorage.removeItem(RESUME_KEY); // External file host reloads the WebView.
-    // Never boot the old document while a bundle switch is underway.
-    return false;
+    // The external file host reloads the WebView with the newly installed game.
+    return;
   } catch (error) {
     console.error('[UpdateGate] Update failed', error);
-    if (promoted) { await ExternalGame.abortLaunch(); return false; }
+    if (promoted) { await ExternalGame.abortLaunch(); return; }
     // Keep the pending marker for automatic recovery on the next app launch.
     overlay.message('Update failed. You can still play the installed version.');
     window.alert('Update failed. The installed version will start.');
     overlay.remove();
-    return true;
+    return;
   }
 }
