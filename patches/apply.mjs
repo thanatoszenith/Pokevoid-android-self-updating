@@ -13,6 +13,8 @@ main = 'import { clearNativeAssetCaches } from "./native-cache";\nimport { armNa
 if (!main.includes('game = new Phaser.Game(config);')) throw new Error('Game construction hook changed');
 main = main.replace('game = new Phaser.Game(config);', 'game = new Phaser.Game(config);\n    if (Capacitor.isNativePlatform()) armNativeLaunch(game);');
 // The update check is scheduled after title composition by native-launch.ts.
+const prefetchImport = 'import { prefetchGameUpdate } from "./update-gate";';
+if (!main.includes(prefetchImport)) main = `${prefetchImport}\n${main}`;
 const directSaveImport = 'import { initializeDirectSaves } from "./direct-saves";';
 if (!main.includes(directSaveImport)) main = `${directSaveImport}\n${main}`;
 const dailySyncImport = 'import { startOfficialDailySync } from "./daily-cache";';
@@ -21,7 +23,7 @@ if (!main.includes(capacitorImport)) main = `${capacitorImport}\n${main}`;
 if (!main.includes(dailySyncImport)) main = `${dailySyncImport}\n${main}`;
 const bootLine = 'const boot = async (): Promise<void> => {';
 if (main.split(bootLine).length !== 2) throw new Error('Expected exactly one PokéVoid boot() entrypoint');
-main = main.replace(bootLine, `${bootLine}\n  if (Capacitor.isNativePlatform()) void clearNativeAssetCaches().catch(error => console.warn('[NativeCache] Maintenance deferred', error));\n  if (Capacitor.isNativePlatform()) { await initializeDirectSaves(); startOfficialDailySync(); }`);
+main = main.replace(bootLine, `${bootLine}\n  if (Capacitor.isNativePlatform()) {\n    prefetchGameUpdate();\n    void clearNativeAssetCaches().catch(error => console.warn('[NativeCache] Maintenance deferred', error));\n    await initializeDirectSaves(); startOfficialDailySync();\n  }`);
 if (!main.includes('await initializeDirectSaves(); startOfficialDailySync();')) throw new Error('Android daily sync startup hook missing');
 // The native launch hook handles readiness and schedules nonblocking update checks.
 const legacyNotify = /if \(typeof \(window as any\)\.Capacitor !== "undefined"\) \{\s*import\("@capgo\/capacitor-updater"\)\.then\(\(\{ CapacitorUpdater \}\) => \{\s*CapacitorUpdater\.notifyAppReady\(\);\s*\}\)\.catch\(\(\) => \{\}\);\s*\}/;
