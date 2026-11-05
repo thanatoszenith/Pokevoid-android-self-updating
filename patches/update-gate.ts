@@ -8,6 +8,20 @@ const REQUEST_TIMEOUT_MS = 3000;
 const RESUME_KEY = 'pokevoid_pending_update';
 type Release = { version: string; url: string; checksum: string; features: string[] };
 
+// Preflight the manifest concurrently with game initialization, but never
+// await it on the startup path. The result is consumed only after the title
+// screen is ready, so offline connections cannot delay gameplay.
+let pendingFeed: Promise<unknown> | undefined;
+function feedRequest(): Promise<unknown> {
+  return pendingFeed ??= readUpdateFeed(FEED, REQUEST_TIMEOUT_MS).catch(error => {
+    console.warn('[UpdateGate] Background update feed unavailable', error);
+    return null;
+  });
+}
+export function prefetchGameUpdate(): void {
+  if (Capacitor.isNativePlatform()) void feedRequest();
+}
+
 function compareVersions(a: string, b: string): number | null {
   if (!/^\d+(\.\d+)*$/.test(a) || !/^\d+(\.\d+)*$/.test(b)) return null;
   const left = a.split('.').map(Number), right = b.split('.').map(Number);
@@ -34,7 +48,7 @@ function trustedGameAsset(feedUrl: string, assetUrl: string, version: string): b
 
 async function checkRelease(state: ExternalState): Promise<Release | null> {
   try {
-    const data = await readUpdateFeed(FEED, REQUEST_TIMEOUT_MS);
+    const data = await feedRequest();
     if (!data || typeof data !== 'object') return null;
     const r = data as Partial<Release>;
     if (typeof r.version !== 'string' || typeof r.url !== 'string' || typeof r.checksum !== 'string') return null;
