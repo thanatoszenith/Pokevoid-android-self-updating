@@ -13,9 +13,15 @@ the grant. Denial does not trigger a repeated settings loop.
 ## Installation and updates
 
 The bootstrap checks permission, recovers interrupted filesystem transactions,
-opens the installed external game offline, or offers a first download. The game
-checks for newer versions before Phaser starts. Both paths use the same native
-downloader, SHA-256 validation, external extraction, activation and WebView loading.
+opens the installed external game offline, or offers a first download. For an
+installed game, the online update manifest is fetched in parallel with essential
+save/game initialization, **without delaying Phaser or the title screen**.
+After the native title-readiness signal is confirmed, the app evaluates the
+prefetched manifest and offers a newer version when available. An accepted update
+blocks game input until installation finishes. Offline play never waits for the
+network; interrupted updates still resume safely on a subsequent launch.
+Both installation paths use the same native downloader, SHA-256 validation,
+external extraction, activation and WebView loading.
 
 One resumable archive exists at `PokeVoid/Game/.downloads`, alongside the external
 game. Large downloads never use app-private storage.
@@ -61,8 +67,12 @@ CacheStorage and service worker registrations are cleared before native gameplay
 and new asset-cache registration is disabled. The official daily cache remains one
 small current-day record.
 
-At startup, retired internal asset directories (`files/versions`, `files/public`,
-`files/resumable-bundles`, `cache/capgo_downloads`) are removed. Old private downloads
+After a confirmed title-screen launch, retired internal asset directories
+(`files/versions`, `files/public`, `files/resumable-bundles`,
+`cache/capgo_downloads`) are removed on a separate low-priority maintenance
+executor, rather than blocking the next startup. Download archive pruning and
+large committed rollback cleanup are likewise deferred until after reopening the
+active external game. Old private downloads
 are discarded and restart externally instead of creating a migration ZIP copy.
 After a successful launch, checksum-named external staging, releases and mirrored
 ZIP leftovers are removed. Saves and arbitrary user files are excluded.
