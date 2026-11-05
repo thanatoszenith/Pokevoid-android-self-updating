@@ -10,6 +10,10 @@ on:
       - 'patches/**'
       - 'scripts/monitor-game-feed.mjs'
       - 'scripts/create-manifest.mjs'
+  workflow_run:
+    workflows:
+      - 'Publish PokéVoid game bundle (no APK)'
+    types: [completed]
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,6 +23,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check-upstream:
+    # Reconcile again after publication so changes made during a running build
+    # are not postponed until the next daily cron invocation.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
