@@ -92,8 +92,14 @@ public class ExternalGamePlugin extends Plugin {
     @PluginMethod public void recover(PluginCall call) {
         execute(call, () -> {
             if (launched) throw new IOException("Cannot recover a running game");
-            storage().recoverForLaunch(); DownloadCache.clean(storage().downloads(), null);
+            storage().recoverForLaunch();
+            // A cold launch must never wait for archive pruning. The external game
+            // can be opened immediately while bounded cleanup runs separately.
             call.resolve(state());
+            maintenance.execute(() -> {
+                try { DownloadCache.clean(ExternalGamePaths.downloads(), null); }
+                catch (IOException error) { android.util.Log.w("PokeVoid", "Download cleanup deferred", error); }
+            });
         });
     }
     @PluginMethod public void stage(PluginCall call) {
