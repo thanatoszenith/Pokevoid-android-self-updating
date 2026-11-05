@@ -137,6 +137,18 @@ public final class ExternalGameStorageTest {
             c.stage(archive,sha(archive),"2"); c.activate(sha(archive));
             new File(committed,".pending").renameTo(new File(committed,".confirmed")); c.recover();
             check(c.version().equals("2") && !new File(committed,".previous").exists(),"crash during committed cleanup");
+            File fastCommitted = new File(base,"fast-committed");
+            ExternalGameStorage fastCopy = oldGame(fastCommitted);
+            fastCopy.stage(archive, sha(archive), "2");
+            fastCopy.activate(sha(archive));
+            new File(fastCommitted,".pending").renameTo(new File(fastCommitted,".confirmed"));
+            fastCopy.recoverForLaunch();
+            check(fastCopy.version().equals("2"), "fast recovery leaves committed current ready");
+            check(new File(fastCommitted,".previous/index.html").isFile(), "large old version is not pruned before launch");
+            fastCopy.confirm();
+            check(!new File(fastCommitted,".previous").exists() && !new File(fastCommitted,".confirmed").exists(),
+                "confirmed launch eventually removes old game and journal");
+
             File saves = new File(base,"saves"); saves.mkdirs();
             marker(saves,".pokevoid-interrupted.tmp","uncommitted");
             marker(saves,"user.tmp","keep"); marker(saves,"committed.json","keep");
