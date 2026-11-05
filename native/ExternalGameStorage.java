@@ -139,7 +139,19 @@ public final class ExternalGameStorage {
     private void recoverInternal(boolean pruneStaging) throws IOException {
         ensureRoot();
         File previous = file(".previous");
-        if (file(".confirmed").exists()) { removeTree(previous); removeTree(file(".confirmed")); }
+        if (file(".confirmed").exists()) {
+            if (pruneStaging) {
+                removeTree(previous); removeTree(file(".confirmed"));
+            } else if (!installed() && previous.exists()) {
+                // A confirmed version went missing: preserve the last known
+                // playable copy. Slow recovery is justified for broken installs.
+                removeTree(current());
+                if (!previous.renameTo(current())) throw new IOException("Cannot restore previous game");
+                removeTree(file(".confirmed"));
+            }
+            // Normal cold launch keeps the confirmed current game ready while
+            // potentially gigabytes of old assets are cleaned after rendering.
+        }
         else {
             if (pending()) {
                 String kind = metadata(file(".pending"), 3);
