@@ -104,6 +104,15 @@ jobs:
           cd dist && zip -qr "../../pokevoid-game-${POKEVOID_VERSION}.zip" .
           cd .. && node ../wrapper/scripts/verify-bundle.mjs "../pokevoid-game-${POKEVOID_VERSION}.zip"
           node ../wrapper/scripts/verify-daily-bundle.mjs "../pokevoid-game-${POKEVOID_VERSION}.zip"
+      - name: Build per-file update index
+        working-directory: game
+        env:
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
+        run: node ../wrapper/scripts/create-file-index.mjs "../pokevoid-game-${POKEVOID_VERSION}.zip" "${POKEVOID_VERSION}" "../pokevoid-files-${POKEVOID_VERSION}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokevoid-file-index
+          path: pokevoid-files-*.json
       - uses: actions/upload-artifact@v4
         with:
           name: pokevoid-downloadable-game-bundle
@@ -156,6 +165,7 @@ jobs:
             exit 1
           fi
           gh release upload game-feed --repo "$GITHUB_REPOSITORY" "pokevoid-game-${POKEVOID_VERSION}.zip"
+          gh release upload game-feed --repo "$GITHUB_REPOSITORY" "pokevoid-files-${POKEVOID_VERSION}.json"
 
       - name: Verify release ZIP is publicly downloadable before advertising it
         if: ${{ inputs.publish }}
