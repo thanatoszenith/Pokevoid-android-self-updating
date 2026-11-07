@@ -4,6 +4,7 @@ export const ExternalGame = registerPlugin<{
   status(): Promise<ExternalState>;
   recover(): Promise<ExternalState>;
   stage(options: { checksum: string; version: string }): Promise<void>;
+  stageDelta(options: { checksum: string; targetChecksum: string; baseVersion: string; version: string; files: Record<string, string> }): Promise<void>;
   activate(options: { checksum: string }): Promise<void>;
   open(): Promise<void>;
   abortLaunch(): Promise<void>;
