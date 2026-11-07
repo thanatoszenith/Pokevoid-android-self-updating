@@ -13,6 +13,10 @@ const progressArea = document.getElementById('progress-area') as HTMLDivElement;
 const progressBar = document.getElementById('download-progress') as HTMLProgressElement;
 const progressDetails = document.getElementById('download-details') as HTMLDivElement;
 const STARTUP_NOTICE_MS = 12000;
+const startupStarted = performance.now();
+function startupMetric(phase: string, started: number): void {
+  console.info(`[PokeVoid startup] ${phase}: ${(performance.now() - started).toFixed(0)} ms; total ${(performance.now() - startupStarted).toFixed(0)} ms`);
+}
 /** Keep an accurate phase visible even when a native filesystem recovery is slow. */
 async function reportStartup<T>(message: string, job: Promise<T>): Promise<T> {
   status.textContent = message;
@@ -20,7 +24,8 @@ async function reportStartup<T>(message: string, job: Promise<T>): Promise<T> {
     if (status.textContent === message)
       status.textContent = message + ' This is taking longer than expected; existing game files and saves are being preserved.';
   }, STARTUP_NOTICE_MS);
-  try { return await job; } finally { clearTimeout(timer); }
+  const started = performance.now();
+  try { return await job; } finally { clearTimeout(timer); startupMetric(message, started); }
 }
 
 let lastSampleTime = 0;
@@ -151,7 +156,8 @@ async function ensureStorageAccess(): Promise<boolean> {
   }
   waitingForStorage = false;
   button.hidden = false;
-  await SharedStorage.createFolders();
+  // Native recovery creates Game as needed; Saves is created on first save.
+  // Avoid blocking every warm launch on two external-storage mkdir/stat calls.
   return true;
 }
 
@@ -162,8 +168,9 @@ async function main() {
   // Browser cache maintenance is best-effort. Do not hold a perfectly good
   // offline installation behind an unresponsive WebView storage API.
   void clearNativeAssetCaches().catch(error => console.warn('[Bootstrap] Cache cleanup deferred', error));
-  if (await reportStartup('Checking installed game in PokeVoid/Game…', restoreInstalledGame())) {
+  if (await reportStartup('Opening installed game…', restoreInstalledGame())) {
     localStorage.removeItem(RESUME_KEY);
+    startupMetric('Installed game open requested', startupStarted);
     return;
   }
   let latest: Release;
