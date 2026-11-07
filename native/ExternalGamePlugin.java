@@ -97,8 +97,14 @@ public class ExternalGamePlugin extends Plugin {
             // can be opened immediately while bounded cleanup runs separately.
             call.resolve(state());
             maintenance.execute(() -> {
-                try { DownloadCache.clean(ExternalGamePaths.downloads(), null); }
-                catch (IOException error) { android.util.Log.w("PokeVoid", "Download cleanup deferred", error); }
+                try {
+                    // A process can die after the launch journal is committed but
+                    // before asynchronous cleanup finishes. Resume it next launch.
+                    storage().cleanupConfirmed();
+                    DownloadCache.clean(ExternalGamePaths.downloads(), null);
+                } catch (IOException error) {
+                    android.util.Log.w("PokeVoid", "Recovery maintenance deferred", error);
+                }
             });
         });
     }
