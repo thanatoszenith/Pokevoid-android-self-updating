@@ -108,6 +108,85 @@ public final class ExternalGameStorage {
             write(new File(staging, ".checksum"), sha.toLowerCase(Locale.ROOT));
         } catch (Exception e) { removeTree(staging); throw e; }
     }
+    /**
+     * Stage a verified differential archive against the currently installed game.
+     * A delta ZIP contains only changed files. The complete target index is
+     * authoritative: deleted files are omitted, unchanged files are copied from
+     * current, and EVERY output file is checked against its expected SHA-256.
+     * Never modify current until activate() journals the transaction.
+     */
+    public synchronized void stageDelta(File archive, String deltaSha, String baseVersion,
+            String targetVersion, String targetArchiveSha, Map<String, String> hashes) throws Exception {
+        if (!installed() || !version().equals(baseVersion)) throw new IOException("Delta base version mismatch");
+        if (deltaSha == null || !deltaSha.matches("[a-fA-F0-9]{64}") ||
+            targetArchiveSha == null || !targetArchiveSha.matches("[a-fA-F0-9]{64}") ||
+            targetVersion == null || !targetVersion.matches("[0-9]+(\\.[0-9]+)*") ||
+            hashes == null || hashes.isEmpty() || hashes.size() > 200000 || !hashes.containsKey("index.html"))
+            throw new IOException("Invalid delta metadata");
+        if (pending() || file(".rollback").exists() || file(".confirmed").exists() || file(".previous").exists())
+            throw new IOException("Game recovery pending");
+        if (!matches(archive, deltaSha)) throw new IOException("Delta archive checksum mismatch");
+        File staging = file(".staging");
+        removeTree(staging);
+        if (!staging.mkdir()) throw new IOException("Cannot create delta staging");
+        String base = staging.getCanonicalPath() + File.separator;
+        Set<String> changed = new HashSet<>();
+        long total = 0;
+        try {
+            for (Map.Entry<String, String> item : hashes.entrySet()) {
+                String name = item.getKey();
+                if (name == null || name.isEmpty() || name.startsWith("/") || name.contains("\\") ||
+                    name.indexOf(0) >= 0 || Arrays.asList(name.split("/", -1)).contains("..") ||
+                    name.equals(".version") || name.equals(".checksum") ||
+                    !item.getValue().matches("[a-fA-F0-9]{64}"))
+                    throw new IOException("Unsafe delta file index");
+                File dest = new File(staging, name);
+                if (!dest.getCanonicalPath().startsWith(base)) throw new IOException("Delta escapes staging");
+            }
+            try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(new FileInputStream(archive)))) {
+                ZipEntry entry;
+                byte[] buffer = new byte[65536];
+                while ((entry = zip.getNextEntry()) != null) {
+                    String name = entry.getName();
+                    if (entry.isDirectory()) { zip.closeEntry(); continue; }
+                    if (!hashes.containsKey(name) || !changed.add(name)) throw new IOException("Unexpected delta entry");
+                    File dest = new File(staging, name);
+                    if (!dest.getCanonicalPath().startsWith(base)) throw new IOException("Unsafe delta entry");
+                    if (!dest.getParentFile().isDirectory() && !dest.getParentFile().mkdirs())
+                        throw new IOException("Cannot create delta directory");
+                    try (FileOutputStream out = new FileOutputStream(dest)) {
+                        int n;
+                        while ((n = zip.read(buffer)) != -1) {
+                            total += n;
+                            if (total > 4L * 1024 * 1024 * 1024) throw new IOException("Delta exceeds 4 GiB");
+                            out.write(buffer, 0, n);
+                        }
+                        out.getFD().sync();
+                    }
+                    zip.closeEntry();
+                }
+            }
+            for (Map.Entry<String, String> item : hashes.entrySet()) {
+                String name = item.getKey();
+                File dest = new File(staging, name);
+                if (!changed.contains(name)) {
+                    File original = new File(current(), name);
+                    if (!original.isFile() || !original.getCanonicalPath().startsWith(current().getCanonicalPath() + File.separator))
+                        throw new IOException("Missing unchanged delta base file: " + name);
+                    if (!dest.getParentFile().isDirectory() && !dest.getParentFile().mkdirs())
+                        throw new IOException("Cannot create delta parent");
+                    Files.copy(original.toPath(), dest.toPath());
+                }
+                if (!matches(dest, item.getValue())) throw new IOException("Delta output checksum mismatch: " + name);
+            }
+            write(new File(staging, ".version"), targetVersion);
+            write(new File(staging, ".checksum"), targetArchiveSha.toLowerCase(Locale.ROOT));
+        } catch (Exception error) {
+            removeTree(staging);
+            throw error;
+        }
+    }
+
     public synchronized void activate(String sha) throws IOException {
         File staged = file(".staging"), previous = file(".previous");
         File checksum = new File(staged, ".checksum");
