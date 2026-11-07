@@ -6,6 +6,10 @@ on:
         description: 'Game bundle version, numeric dotted'
         required: true
         type: string
+      previous_version:
+        description: 'Previously published game version to generate a differential update from (optional)'
+        required: false
+        type: string
       upstream_ref:
         description: 'Upstream PokéVoid commit SHA to build'
         required: false
@@ -130,6 +134,28 @@ jobs:
         id: patch_revision
         run: echo "revision=$(git -C wrapper rev-parse HEAD:patches)" >> "$GITHUB_OUTPUT"
 
+      - name: Generate optional differential update
+        if: ${{ inputs.publish && inputs.previous_version != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_VERSION: ${{ inputs.previous_version }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$PREVIOUS_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || exit 1
+          test "$PREVIOUS_VERSION" != "$POKEVOID_VERSION"
+          gh release download game-feed --repo "$GITHUB_REPOSITORY" --pattern "pokevoid-game-${PREVIOUS_VERSION}.zip" --dir .
+          node wrapper/scripts/create-delta.mjs "pokevoid-game-${PREVIOUS_VERSION}.zip" "pokevoid-game-${POKEVOID_VERSION}.zip" "$PREVIOUS_VERSION" "$POKEVOID_VERSION" "pokevoid-delta-${PREVIOUS_VERSION}-to-${POKEVOID_VERSION}.zip" delta-metadata.json
+      - name: Upload optional delta archive
+        if: ${{ inputs.publish && inputs.previous_version != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_VERSION: ${{ inputs.previous_version }}
+          POKEVOID_VERSION: ${{ steps.normalize.outputs.version }}
+        run: |
+          if test -f "pokevoid-delta-${PREVIOUS_VERSION}-to-${POKEVOID_VERSION}.zip"; then
+            gh release upload game-feed --repo "$GITHUB_REPOSITORY" "pokevoid-delta-${PREVIOUS_VERSION}-to-${POKEVOID_VERSION}.zip"
+          fi
       - name: Generate release manifest
         if: ${{ inputs.publish }}
         env:
