@@ -22,7 +22,7 @@ async function fixture({pending=true,failed=false,openFails=false,granted=true,g
     abortLaunch:async()=>calls.push('abort'),
   };
   const source=fs.readFileSync('bootstrap/main.ts','utf8').replace(/^import .*;$/gm,'').replace("'__POKEVOID_UPDATE_FEED__'","'https://owner.github.io/repo/capacitor-update.json'");
-  const context=vm.createContext({console,URL,document,localStorage,Date,setTimeout,clearTimeout,ExternalGame,window:{addEventListener(){}},Capacitor:{isNativePlatform:()=>true},
+  const context=vm.createContext({console,URL,document,localStorage,Date,performance,setTimeout,clearTimeout,ExternalGame,window:{addEventListener(){}},Capacitor:{isNativePlatform:()=>true},
     SharedStorage:{
       status:async()=>({granted:storageGranted}),createFolders:async()=>{},
       requestAccess:async()=>{accessRequests++;storageGranted=grantOnRequest;return {granted:storageGranted};},
