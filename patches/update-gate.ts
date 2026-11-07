@@ -6,7 +6,8 @@ import { ExternalGame, type ExternalState } from './external-game';
 const FEED = '__POKEVOID_UPDATE_FEED__';
 const REQUEST_TIMEOUT_MS = 3000;
 const RESUME_KEY = 'pokevoid_pending_update';
-type Release = { version: string; url: string; checksum: string; features: string[] };
+type Delta = { from: string; url: string; checksum: string; files: Record<string, string> };
+type Release = { version: string; url: string; checksum: string; features: string[]; delta?: Delta };
 
 // Preflight the manifest concurrently with game initialization, but never
 // await it on the startup path. The result is consumed only after the title
@@ -59,6 +60,20 @@ async function checkRelease(state: ExternalState): Promise<Release | null> {
     if (state.failedChecksum === r.checksum.toLowerCase()) return null;
     return compareVersions(r.version, state.version) === 1 ? r as Release : null;
   } catch (error) { console.warn('[UpdateGate] Offline or update check failed', error); return null; }
+}
+
+function verifiedDelta(release: Release, currentVersion: string): Delta | null {
+  const delta = release.delta;
+  if (!delta || delta.from !== currentVersion || !/^\d+(?:\.\d+)*$/.test(delta.from) ||
+      !/^[a-fA-F0-9]{64}$/.test(delta.checksum) || !delta.files || typeof delta.files !== 'object' ||
+      Array.isArray(delta.files) || !Object.prototype.hasOwnProperty.call(delta.files, 'index.html')) return null;
+  const entries = Object.entries(delta.files);
+  if (!entries.length || entries.length > 200000 || entries.some(([name, hash]) =>
+      !name || name.startsWith('/') || name.includes('\\') || name.split('/').includes('..') ||
+      name === '.version' || name === '.checksum' || !/^[a-fA-F0-9]{64}$/.test(hash))) return null;
+  const base = release.url.slice(0, release.url.lastIndexOf('/') + 1);
+  const expected = base + `pokevoid-delta-${delta.from}-to-${release.version}.zip`;
+  return delta.url === expected ? delta : null;
 }
 
 function showOverlay(): { message: (s: string) => void; remove: () => void } {
@@ -128,10 +143,28 @@ export async function checkGameUpdates(): Promise<void> {
     };
     const listener = await ResumableDownload.addListener('progress', ({ downloaded, total }) => report(downloaded, total));
     try {
-      await ResumableDownload.download({ url: release.url, checksum: release.checksum });
-      overlay.message('Extracting update to PokeVoid/Game…');
-      await ExternalGame.stage({ version: release.version, checksum: release.checksum });
-      await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
+      const delta = verifiedDelta(release, state.version);
+      let deltaReady = false;
+      if (delta) {
+        try {
+          overlay.message('Downloading smaller differential update…');
+          await ResumableDownload.download({ url: delta.url, checksum: delta.checksum });
+          overlay.message('Verifying and staging changed game files…');
+          await ExternalGame.stageDelta({ checksum: delta.checksum, targetChecksum: release.checksum, baseVersion: delta.from, version: release.version, files: delta.files });
+          deltaReady = true;
+        } catch (error) {
+          console.warn('[UpdateGate] Differential update unavailable; using full archive', error);
+          overlay.message('Differential update failed. Downloading full verified game…');
+        } finally {
+          await ResumableDownload.releaseArchive({ checksum: delta.checksum }).catch(() => {});
+        }
+      }
+      if (!deltaReady) {
+        await ResumableDownload.download({ url: release.url, checksum: release.checksum });
+        overlay.message('Extracting update to PokeVoid/Game…');
+        await ExternalGame.stage({ version: release.version, checksum: release.checksum });
+        await ResumableDownload.releaseArchive({ checksum: release.checksum }).catch(error => console.warn('[UpdateGate] Archive cleanup deferred', error));
+      }
     } finally { await listener.remove().catch(error => console.warn('[UpdateGate] Progress listener cleanup failed', error)); }
     overlay.message('Installing update…');
     await ExternalGame.activate({ checksum: release.checksum });
