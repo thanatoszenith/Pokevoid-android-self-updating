@@ -26,7 +26,7 @@ test('native game startup does not await cache maintenance', () => {
   const bootstrap = fs.readFileSync('bootstrap/main.ts', 'utf8');
   assert.doesNotMatch(apply, /await clearNativeAssetCaches\(/);
   assert.doesNotMatch(bootstrap, /await clearNativeAssetCaches\(/);
-  assert.match(bootstrap, /Checking installed game in PokeVoid\/Game/);
+  assert.match(bootstrap, /Opening installed game/);
   assert.match(bootstrap, /reportStartup/);
   const html = fs.readFileSync('bootstrap/index.html', 'utf8');
   assert.match(html, /The installer did not start/);
