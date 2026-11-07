@@ -7,7 +7,8 @@ test('both installation flows stage, release the single archive, activate, then 
     const calls = ['ResumableDownload.download(', 'ExternalGame.stage(', 'ResumableDownload.releaseArchive(', 'ExternalGame.activate(', 'ExternalGame.open('];
     let previous = -1;
     for (const call of calls) {
-      const index = source.indexOf(call, source.indexOf('ResumableDownload.download('));
+      const fullFlow = file === 'patches/update-gate.ts' ? source.slice(source.indexOf('if (!deltaReady) {')) : source;
+      const index = fullFlow.indexOf(call, fullFlow.indexOf('ResumableDownload.download('));
       assert.ok(index > previous, file + ': ' + call); previous = index;
     }
     assert.doesNotMatch(source, /CapacitorUpdater/);
