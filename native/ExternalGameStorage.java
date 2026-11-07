@@ -124,8 +124,17 @@ public final class ExternalGameStorage {
     public synchronized void confirm() throws IOException {
         if (!installed()) throw new IOException("No active game");
         if (pending() && !file(".pending").renameTo(file(".confirmed"))) throw new IOException("Cannot commit launch");
-        // A crash during cleanup must never roll back a confirmed game.
-        removeTree(file(".previous")); removeTree(file(".confirmed"));
+        // Commit must be fast: never recursively delete a multi-gigabyte old game
+        // on the launch-critical worker. The durable .confirmed journal means
+        // subsequent launches retain current even if cleanup is interrupted.
+        // Post-launch maintenance removes .previous and then .confirmed.
+    }
+    /** Delete retired game files only after the title screen is ready. */
+    public synchronized void cleanupConfirmed() throws IOException {
+        if (!file(".confirmed").exists()) return;
+        if (!installed()) throw new IOException("Cannot clean rollback without a playable game");
+        removeTree(file(".previous"));
+        removeTree(file(".confirmed"));
     }
     public synchronized void recover() throws IOException {
         recoverInternal(true);
