@@ -39,3 +39,12 @@ test('resumable downloader preserves partial data after retry exhaustion', () =>
   assert.match(source, /partial data preserved/);
   assert.match(source, /Range/);
 });
+
+test('interrupted post-confirm cleanup resumes on next launch', () => {
+  const plugin = read('native/ExternalGamePlugin.java');
+  const recover = plugin.slice(plugin.indexOf('@PluginMethod public void recover('), plugin.indexOf('@PluginMethod public void stage('));
+  assert.match(recover, /maintenance\.execute\(\(\) -> \{/);
+  assert.match(recover, /storage\(\)\.cleanupConfirmed\(\)/);
+  const storage = read('native/ExternalGameStorage.java');
+  assert.match(storage, /if \(!file\("\.confirmed"\)\.exists\(\)\) return;/);
+});
