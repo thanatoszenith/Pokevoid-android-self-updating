@@ -146,6 +146,7 @@ public final class ExternalGameStorageTest {
             check(fastCopy.version().equals("2"), "fast recovery leaves committed current ready");
             check(new File(fastCommitted,".previous/index.html").isFile(), "large old version is not pruned before launch");
             fastCopy.confirm();
+            fastCopy.cleanupConfirmed(); // Expensive deletion is deliberately deferred off the launch worker.
             check(!new File(fastCommitted,".previous").exists() && !new File(fastCommitted,".confirmed").exists(),
                 "confirmed launch eventually removes old game and journal");
 
