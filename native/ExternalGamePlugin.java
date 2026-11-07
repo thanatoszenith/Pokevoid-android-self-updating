@@ -160,15 +160,19 @@ public class ExternalGamePlugin extends Plugin {
             // Confirmation is durable before best-effort maintenance starts.
             call.resolve();
             scheduleInternalCleanup();
-            try {
-                DownloadCache.clean(storage().downloads(), "");
-                cleanLegacyAssets();
-            } catch (IOException error) {
-                android.util.Log.w("PokeVoid", "Post-launch cleanup will retry", error);
-            }
-            // WebView asset caching remains disabled; prune any older cache after
-            // the game has actually reached its title screen, not before opening.
-            onUi(() -> getBridge().getWebView().clearCache(true));
+            // Recursive rollback and staging cleanup can take minutes on slow
+            // external storage. Never queue it on the launch-critical worker.
+            maintenance.execute(() -> {
+                try {
+                    storage().cleanupConfirmed();
+                    DownloadCache.clean(storage().downloads(), "");
+                    cleanLegacyAssets();
+                } catch (IOException error) {
+                    android.util.Log.w("PokeVoid", "Post-launch cleanup will retry", error);
+                }
+            });
+            // Cache purging is unnecessary for every launch: LOAD_NO_CACHE
+            // already prevents stale WebView HTTP assets from being reused.
         });
     }
     private void cleanLegacyAssets() throws IOException {
