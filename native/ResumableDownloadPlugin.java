@@ -186,7 +186,7 @@ public class ResumableDownloadPlugin extends Plugin {
                 long lastEvent = System.currentTimeMillis();
                 try (InputStream input = c.getInputStream();
                      FileOutputStream output = new FileOutputStream(partial, offset > 0)) {
-                    byte[] buf = new byte[65536];
+                    byte[] buf = new byte[262144];
                     int n;
                     while ((n = input.read(buf)) != -1) {
                         if ((long)n > DownloadCache.MAX_BYTES - done) throw new IOException("Archive exceeds download limit");
