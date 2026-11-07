@@ -57,12 +57,18 @@ public final class ExternalGameStorage {
     public static boolean matches(File archive, String expected) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         try (InputStream in = new FileInputStream(archive)) {
-            byte[] b = new byte[65536]; int n;
+            byte[] b = new byte[262144]; int n;
             while ((n = in.read(b)) != -1) md.update(b, 0, n);
         }
-        StringBuilder hex = new StringBuilder();
-        for (byte b : md.digest()) hex.append(String.format(Locale.ROOT, "%02x", b & 255));
-        return hex.toString().equalsIgnoreCase(expected);
+        byte[] digest = md.digest();
+        final char[] digits = "0123456789abcdef".toCharArray();
+        char[] hex = new char[digest.length * 2];
+        for (int i = 0; i < digest.length; i++) {
+            int value = digest[i] & 255;
+            hex[i * 2] = digits[value >>> 4];
+            hex[i * 2 + 1] = digits[value & 15];
+        }
+        return new String(hex).equalsIgnoreCase(expected);
     }
     public synchronized void stage(File archive, String sha, String version) throws Exception {
         if (sha == null || !sha.matches("[a-fA-F0-9]{64}") || version == null || version.length() > 128 || !version.matches("[0-9]+(\\.[0-9]+)*"))
@@ -78,7 +84,7 @@ public final class ExternalGameStorage {
             Set<String> names = new HashSet<>(); long total = 0; int count = 0;
             String base = staging.getCanonicalPath() + File.separator;
             try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(new FileInputStream(archive)))) {
-                ZipEntry entry; byte[] buffer = new byte[65536];
+                ZipEntry entry; byte[] buffer = new byte[262144];
                 while ((entry = zip.getNextEntry()) != null) {
                     String name = entry.getName();
                     if (++count > 200000 || name.startsWith("/") || name.contains("\\") || name.indexOf('\0') >= 0
@@ -97,7 +103,8 @@ public final class ExternalGameStorage {
                                 if (total > 4L * 1024 * 1024 * 1024) throw new IOException("Game exceeds 4 GiB");
                                 out.write(buffer, 0, n);
                             }
-                            out.getFD().sync();
+                            // Staging is disposable until activation; avoid forcing each
+                            // individual asset to flash storage during extraction.
                         }
                     }
                     zip.closeEntry();
@@ -145,7 +152,7 @@ public final class ExternalGameStorage {
             }
             try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(new FileInputStream(archive)))) {
                 ZipEntry entry;
-                byte[] buffer = new byte[65536];
+                byte[] buffer = new byte[262144];
                 while ((entry = zip.getNextEntry()) != null) {
                     String name = entry.getName();
                     if (entry.isDirectory()) { zip.closeEntry(); continue; }
@@ -161,7 +168,7 @@ public final class ExternalGameStorage {
                             if (total > 4L * 1024 * 1024 * 1024) throw new IOException("Delta exceeds 4 GiB");
                             out.write(buffer, 0, n);
                         }
-                        out.getFD().sync();
+                        // The transaction journal is synced at activation.
                     }
                     zip.closeEntry();
                 }
