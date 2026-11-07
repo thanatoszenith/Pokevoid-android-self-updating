@@ -126,6 +126,34 @@ public class ExternalGamePlugin extends Plugin {
             call.resolve();
         });
     }
+    @PluginMethod public void stageDelta(PluginCall call) {
+        execute(call, () -> {
+            String sha = call.getString("checksum");
+            String targetSha = call.getString("targetChecksum");
+            String baseVersion = call.getString("baseVersion");
+            String targetVersion = call.getString("version");
+            com.getcapacitor.JSObject index = call.getObject("files");
+            if (sha == null || !sha.matches("[a-fA-F0-9]{64}") || index == null)
+                throw new IOException("Invalid delta request");
+            java.util.Map<String, String> hashes = new java.util.HashMap<>();
+            java.util.Iterator<String> keys = index.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                Object value = index.opt(key);
+                if (!(value instanceof String)) throw new IOException("Invalid file hash");
+                hashes.put(key, (String) value);
+            }
+            File downloads = storage().downloads();
+            File archive = new File(downloads, sha.toLowerCase(java.util.Locale.ROOT) + ".zip");
+            try (DownloadCache.Lease lease = DownloadCache.hold(archive)) {
+                storage().stageDelta(archive, sha, baseVersion, targetVersion, targetSha, hashes);
+            } finally {
+                try { DownloadCache.release(downloads, sha); }
+                catch (IOException error) { android.util.Log.w("PokeVoid", "Delta cleanup deferred", error); }
+            }
+            call.resolve();
+        });
+    }
     @PluginMethod public void activate(PluginCall call) {
         execute(call, () -> {
             storage().activate(call.getString("checksum")); call.resolve();
