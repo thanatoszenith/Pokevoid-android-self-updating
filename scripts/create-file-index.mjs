@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 /** Deterministic per-file inventory for future incremental updates.
  * Generated at publication, never during a normal Android launch.
@@ -18,8 +18,29 @@ export function createFileIndex(zip, version) {
       throw Error('Unsafe or duplicate archive entry');
     seen.add(name);
     if (name.endsWith('/')) continue;
-    const bytes = execFileSync('unzip', ['-p', zip, name], { maxBuffer: 256 * 1024 * 1024 });
-    files.push({ path: name, size: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
+    // Stream extraction through a small temporary file instead of buffering
+    // potentially huge game assets in the Node.js heap.
+    const tmp = fs.mkdtempSync(new URL('pokevoid-index-', 'file:///tmp/').pathname);
+    try {
+      const target = tmp + '/entry';
+      const fd = fs.openSync(target, 'w');
+      try {
+        const result = spawnSync('unzip', ['-p', zip, name], { stdio: ['ignore', fd, 'pipe'], maxBuffer: 1024 * 1024 });
+        if (result.status !== 0 || result.error) throw Error('Cannot extract indexed entry: ' + name);
+      } finally { fs.closeSync(fd); }
+      const hash = crypto.createHash('sha256');
+      const file = fs.openSync(target, 'r');
+      let size = 0;
+      try {
+        const buffer = Buffer.allocUnsafe(65536);
+        let n;
+        while ((n = fs.readSync(file, buffer, 0, buffer.length, null)) > 0) {
+          hash.update(buffer.subarray(0, n));
+          size += n;
+        }
+      } finally { fs.closeSync(file); }
+      files.push({ path: name, size, sha256: hash.digest('hex') });
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   }
   files.sort((a, b) => a.path.localeCompare(b.path, 'en'));
   return { schema: 1, version, archiveSha256: crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex'), files };
