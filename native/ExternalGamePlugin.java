@@ -171,6 +171,9 @@ public class ExternalGamePlugin extends Plugin {
                 ui.removeCallbacks(timeout);
                 activeBase = base; launched = true; loadFailed = false;
                 getBridge().setServerBasePath(base.getPath());
+                // Explicitly navigate: changing the server base alone does not
+                // guarantee the existing bootstrap document is reloaded.
+                getBridge().getWebView().loadUrl("https://localhost/");
                 if (waiting) ui.postDelayed(timeout, 180000);
             });
             call.resolve();
