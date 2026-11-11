@@ -1,3 +1,11 @@
+test('native open navigates to external game after switching WebView base', () => {
+  const source = fs.readFileSync('native/ExternalGamePlugin.java', 'utf8');
+  const start = source.indexOf('@PluginMethod public void open(');
+  const end = source.indexOf('@PluginMethod public void abortLaunch(', start);
+  const open = source.slice(start, end);
+  assert.ok(open.indexOf('setServerBasePath(base.getPath())') >= 0);
+  assert.ok(open.indexOf('getWebView().loadUrl("https://localhost/")') > open.indexOf('setServerBasePath(base.getPath())'));
+});
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
